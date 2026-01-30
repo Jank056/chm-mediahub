@@ -11,9 +11,9 @@ from models.user import User
 
 router = APIRouter(prefix="/chat", tags=["chat"])
 
-# Chatbot API URL (existing deployment)
-import os
-CHATBOT_API_URL = os.getenv("CHATBOT_API_URL", "http://host.docker.internal:8000")
+# Chatbot API URL from settings
+from config import get_settings
+CHATBOT_API_URL = get_settings().chatbot_api_url
 
 
 class ChatQuery(BaseModel):
