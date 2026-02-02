@@ -11,7 +11,17 @@ from slowapi.errors import RateLimitExceeded
 from config import get_settings
 from database import engine
 from models import Base
-from routers import analytics_router, auth_router, chat_router, clients_router, reports_router, users_router, webhook_router
+from routers import (
+    analytics_router,
+    auth_router,
+    chat_router,
+    clients_router,
+    linkedin_router,
+    oauth_router,
+    reports_router,
+    users_router,
+    webhook_router,
+)
 from services.redis_store import RedisStore
 from middleware.rate_limit import limiter
 
@@ -69,6 +79,8 @@ app.include_router(analytics_router)
 app.include_router(auth_router)
 app.include_router(chat_router)
 app.include_router(clients_router)
+app.include_router(linkedin_router)
+app.include_router(oauth_router)
 app.include_router(reports_router)
 app.include_router(users_router)
 app.include_router(webhook_router)

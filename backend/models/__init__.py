@@ -18,6 +18,9 @@ from models.project import Project
 from models.kol import KOL, KOLGroup, KOLGroupMember
 from models.client_user import ClientUser, ClientRole
 
+# Platform connections
+from models.platform_connection import PlatformConnection, Platform, LinkedInOrgStats
+
 __all__ = [
     # Base
     "Base",
@@ -40,4 +43,8 @@ __all__ = [
     "KOLGroupMember",
     "ClientUser",
     "ClientRole",
+    # Platform connections
+    "PlatformConnection",
+    "Platform",
+    "LinkedInOrgStats",
 ]

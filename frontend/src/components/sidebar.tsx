@@ -14,6 +14,7 @@ const navigation = [
   { name: "Chatbot", href: "/dashboard/chatbot", roles: ["admin", "editor", "viewer"] },
   { name: "Reports", href: "/dashboard/reports", roles: ["admin", "editor"] },
   { name: "Users", href: "/dashboard/users", roles: ["admin"] },
+  { name: "Settings", href: "/dashboard/settings", roles: ["admin"] },
 ];
 
 export function Sidebar() {

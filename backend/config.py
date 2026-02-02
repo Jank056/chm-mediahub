@@ -50,6 +50,13 @@ class Settings(BaseSettings):
     upload_dir: str = "./uploads"
     reports_dir: str = "./reports"
 
+    # LinkedIn OAuth (read-only analytics for CHM's official page)
+    linkedin_client_id: str = ""
+    linkedin_client_secret: str = ""
+    linkedin_redirect_uri: str = "http://localhost:8002/api/oauth/linkedin/callback"
+    linkedin_scopes: str = "openid profile r_organization_admin"
+    linkedin_org_urn: str = ""  # CHM's organization URN (urn:li:organization:XXXXX)
+
     # CORS
     cors_origins: list[str] = ["http://localhost:3001", "http://127.0.0.1:3001"]
 
