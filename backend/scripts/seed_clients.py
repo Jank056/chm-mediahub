@@ -59,21 +59,21 @@ KOL_GROUPS_DATA = [
     {"project_code": "SOCIAL", "name": "Mouabbi/O'Shaughnessey/Rimawi", "video_count": 5, "day": "Monday",
      "kols": ["Dr. Jason Mouabbi", "Dr. Joyce O'Shaughnessy", "Dr. Mothaffar Rimawi"]},
     {"project_code": "SOCIAL", "name": "Kang/Bardia", "video_count": 8, "day": "Monday",
-     "kols": ["Dr. Seock-Ah Im Kang", "Dr. Aditya Bardia"]},
+     "kols": ["Dr. Irene Kang", "Dr. Aditya Bardia"]},
     {"project_code": "SOCIAL", "name": "Iyengar/Dietrich", "video_count": 6, "day": "Tuesday",
-     "kols": ["Dr. Neil Iyengar", "Dr. Mary Dietrich"]},
+     "kols": ["Dr. Neil Iyengar", "Dr. Martin Dietrich"]},
 
     # DB09 sheet (Daiichi Sankyo)
     {"project_code": "DB09", "name": "Mouabbi/O'Shaughnessey/Rimawi", "video_count": 5, "day": "Monday",
      "kols": ["Dr. Jason Mouabbi", "Dr. Joyce O'Shaughnessy", "Dr. Mothaffar Rimawi"]},
     {"project_code": "DB09", "name": "Kang/Bardia", "video_count": 8, "day": "Monday",
-     "kols": ["Dr. Seock-Ah Im Kang", "Dr. Aditya Bardia"]},
+     "kols": ["Dr. Irene Kang", "Dr. Aditya Bardia"]},
     {"project_code": "DB09", "name": "Iyengar/Dietrich", "video_count": 6, "day": "Tuesday",
-     "kols": ["Dr. Neil Iyengar", "Dr. Mary Dietrich"]},
+     "kols": ["Dr. Neil Iyengar", "Dr. Martin Dietrich"]},
 
     # Early Breast Cancer Daiichi sheet
     {"project_code": "EBC", "name": "Gadi/Rao", "video_count": 5, "day": "Monday",
-     "kols": ["Dr. Vijay Gadi", "Dr. Rashmi Rao"]},
+     "kols": ["Dr. VK Gadi", "Dr. Ruta Rao"]},
     {"project_code": "EBC", "name": "Conlin/McArthur", "video_count": 6, "day": "Wednesday",
      "kols": ["Dr. Alicia Conlin", "Dr. Heather McArthur"]},
     {"project_code": "EBC", "name": "Iyengar/Jhaveri", "video_count": 8, "day": "Friday",
@@ -93,7 +93,7 @@ KOL_GROUPS_DATA = [
     {"project_code": "ENHERTU", "name": "Mouabbi Rimawi", "video_count": 8, "day": "Tuesday",
      "kols": ["Dr. Jason Mouabbi", "Dr. Mothaffar Rimawi"]},
     {"project_code": "ENHERTU", "name": "Hamilton/Vidal", "video_count": 4, "day": "Wednesday",
-     "kols": ["Dr. Erika Hamilton", "Dr. Guilherme Vidal"]},
+     "kols": ["Dr. Erika Hamilton", "Dr. Gregory Vidal"]},
 
     # Lymparza sheet (AstraZeneca)
     {"project_code": "LYMPARZA", "name": "Iyengar/Robson", "video_count": 8, "day": "Wednesday",
@@ -101,7 +101,7 @@ KOL_GROUPS_DATA = [
 
     # Neratinib Puma sheet
     {"project_code": "NERATINIB", "name": "Mouabbi/Birhiray/Chang", "video_count": 8, "day": "Thursday",
-     "kols": ["Dr. Jason Mouabbi", "Dr. Avan Birhiray", "Dr. Jennifer Chang"]},
+     "kols": ["Dr. Jason Mouabbi", "Dr. Ruemu Birhiray", "Dr. Jennifer Chang"]},
 ]
 
 

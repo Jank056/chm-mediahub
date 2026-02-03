@@ -81,21 +81,12 @@ async def exchange_code_for_tokens(code: str) -> dict:
 async def get_user_info(access_token: str) -> Tuple[str, str]:
     """Get LinkedIn user info (member URN and name).
 
-    Uses the OpenID Connect userinfo endpoint.
+    Note: Without openid/profile scopes, we can't get user details.
+    Returns placeholder values - the org URN from settings is used anyway.
     """
-    async with httpx.AsyncClient(timeout=20) as client:
-        response = await client.get(
-            "https://api.linkedin.com/v2/userinfo",
-            headers={"Authorization": f"Bearer {access_token}"},
-        )
-        response.raise_for_status()
-        data = response.json()
-
-        # sub contains the member ID
-        member_id = data.get("sub", "")
-        member_urn = f"urn:li:person:{member_id}"
-        name = data.get("name", "Unknown")
-        return member_urn, name
+    # Without openid scope, we can't access userinfo endpoint
+    # Just return placeholders - oauth.py uses settings.linkedin_org_urn anyway
+    return "urn:li:person:unknown", "CHM Admin"
 
 
 async def get_admin_organizations(access_token: str) -> list[dict]:
@@ -150,28 +141,46 @@ async def fetch_organization_stats(access_token: str, org_urn: str) -> dict:
     }
 
     async with httpx.AsyncClient(timeout=20) as client:
-        # Get follower count
+        # Get follower count - try network size API first (more reliable)
         try:
+            # Use networkSizes endpoint which is simpler and more reliable
             response = await client.get(
-                "https://api.linkedin.com/v2/organizationalEntityFollowerStatistics",
-                params={
-                    "q": "organizationalEntity",
-                    "organizationalEntity": org_urn,
-                },
+                f"https://api.linkedin.com/v2/networkSizes/{org_urn}",
+                params={"edgeType": "CompanyFollowedByMember"},
                 headers=headers,
             )
+            logger.info(f"LinkedIn networkSizes API response: {response.status_code}")
             if response.status_code == 200:
                 data = response.json()
-                elements = data.get("elements", [])
-                if elements:
-                    follower_counts = elements[0].get("followerCounts", {})
-                    stats["follower_count"] = follower_counts.get(
-                        "organicFollowerCount", 0
-                    )
+                logger.info(f"LinkedIn networkSizes data: {data}")
+                stats["follower_count"] = data.get("firstDegreeSize", 0)
             else:
                 logger.warning(
-                    f"Failed to fetch follower stats: {response.status_code} - {response.text}"
+                    f"networkSizes API failed: {response.status_code} - {response.text}"
                 )
+                # Fall back to follower statistics endpoint
+                response = await client.get(
+                    "https://api.linkedin.com/v2/organizationalEntityFollowerStatistics",
+                    params={
+                        "q": "organizationalEntity",
+                        "organizationalEntity": org_urn,
+                    },
+                    headers=headers,
+                )
+                logger.info(f"LinkedIn followerStats API response: {response.status_code}")
+                if response.status_code == 200:
+                    data = response.json()
+                    logger.info(f"LinkedIn followerStats data: {data}")
+                    elements = data.get("elements", [])
+                    if elements:
+                        follower_counts = elements[0].get("followerCounts", {})
+                        stats["follower_count"] = follower_counts.get(
+                            "organicFollowerCount", 0
+                        )
+                else:
+                    logger.warning(
+                        f"Failed to fetch follower stats: {response.status_code} - {response.text}"
+                    )
         except Exception as e:
             logger.warning(f"Failed to fetch LinkedIn follower count: {e}")
 

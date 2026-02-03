@@ -79,15 +79,49 @@ async def linkedin_auth_start(
 
 @router.get("/linkedin/callback")
 async def linkedin_callback(
-    code: str,
-    state: str,
     db: Annotated[AsyncSession, Depends(get_db)],
+    code: str | None = None,
+    state: str | None = None,
+    error: str | None = None,
+    error_description: str | None = None,
 ) -> HTMLResponse:
     """LinkedIn OAuth callback handler.
 
     Exchanges code for tokens and stores the connection.
     This endpoint is called by LinkedIn after user authorization.
     """
+    # Handle OAuth errors (user denied, etc.)
+    if error:
+        error_msg = error_description or error
+        logger.warning(f"LinkedIn OAuth error: {error} - {error_description}")
+        return HTMLResponse(
+            content=f"""
+            <html><body style="font-family:system-ui;margin:2rem;text-align:center;">
+              <h2 style="color:#ef4444;">Authorization Failed</h2>
+              <p>{error_msg}</p>
+              <p style="color:#666;margin-top:1rem;">Please close this window and try again.</p>
+              <script>
+                setTimeout(() => {{
+                  window.opener?.postMessage({{type: 'oauth-error', platform: 'linkedin', error: '{error}'}}, '*');
+                }}, 1000);
+              </script>
+            </body></html>
+            """,
+            status_code=400,
+        )
+
+    # Require code and state
+    if not code or not state:
+        return HTMLResponse(
+            content="""
+            <html><body style="font-family:system-ui;margin:2rem;text-align:center;">
+              <h2 style="color:#ef4444;">Error: Missing Parameters</h2>
+              <p>Authorization code or state is missing. Please try again.</p>
+            </body></html>
+            """,
+            status_code=400,
+        )
+
     # Verify state (CSRF protection)
     if not verify_oauth_state(state):
         return HTMLResponse(

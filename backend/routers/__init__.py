@@ -9,6 +9,8 @@ from .oauth import router as oauth_router
 from .reports import router as reports_router
 from .users import router as users_router
 from .webhook import router as webhook_router
+from .x import router as x_router
+from .youtube import router as youtube_router
 
 __all__ = [
     "analytics_router",
@@ -20,4 +22,6 @@ __all__ = [
     "reports_router",
     "users_router",
     "webhook_router",
+    "x_router",
+    "youtube_router",
 ]

@@ -54,8 +54,17 @@ class Settings(BaseSettings):
     linkedin_client_id: str = ""
     linkedin_client_secret: str = ""
     linkedin_redirect_uri: str = "http://localhost:8002/api/oauth/linkedin/callback"
-    linkedin_scopes: str = "openid profile r_organization_admin"
+    linkedin_scopes: str = "rw_organization_admin"
     linkedin_org_urn: str = ""  # CHM's organization URN (urn:li:organization:XXXXX)
+
+    # X/Twitter API (read-only analytics for CHM's official account)
+    x_bearer_token: str = ""
+    x_account_handle: str = ""  # e.g. "hlthinourhands" (without @)
+
+    # YouTube Data API (read-only analytics for CHM's official channel)
+    youtube_api_key: str = ""
+    youtube_channel_id: str = ""  # e.g. "UCCB0N8VIIexXP10t_HDabQA"
+    youtube_channel_handle: str = ""  # e.g. "@CommunityHealthMedia"
 
     # CORS
     cors_origins: list[str] = ["http://localhost:3001", "http://127.0.0.1:3001"]

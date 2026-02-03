@@ -23,23 +23,52 @@ interface LinkedInStats {
   last_synced_at: string | null;
 }
 
+interface XStats {
+  connected: boolean;
+  account_handle: string | null;
+  follower_count: number;
+  tweet_count: number;
+  following_count: number;
+  listed_count: number;
+  last_synced_at: string | null;
+}
+
+interface YouTubeStats {
+  connected: boolean;
+  channel_id: string | null;
+  channel_title: string | null;
+  custom_url: string | null;
+  subscriber_count: number;
+  view_count: number;
+  video_count: number;
+  last_synced_at: string | null;
+}
+
 export default function SettingsPage() {
   const [connections, setConnections] = useState<PlatformConnection[]>([]);
   const [linkedInStats, setLinkedInStats] = useState<LinkedInStats | null>(null);
+  const [xStats, setXStats] = useState<XStats | null>(null);
+  const [youtubeStats, setYoutubeStats] = useState<YouTubeStats | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isConnecting, setIsConnecting] = useState(false);
-  const [isSyncing, setIsSyncing] = useState(false);
+  const [isSyncingLinkedIn, setIsSyncingLinkedIn] = useState(false);
+  const [isSyncingX, setIsSyncingX] = useState(false);
+  const [isSyncingYouTube, setIsSyncingYouTube] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const fetchData = async () => {
     try {
       setError(null);
-      const [connectionsRes, statsRes] = await Promise.all([
+      const [connectionsRes, linkedInStatsRes, xStatsRes, youtubeStatsRes] = await Promise.all([
         api.get("/api/oauth/connections"),
-        api.get("/api/linkedin/stats"),
+        api.get("/api/linkedin/stats").catch(() => null),
+        api.get("/api/x/stats").catch(() => null),
+        api.get("/api/youtube/stats").catch(() => null),
       ]);
       setConnections(connectionsRes.data.connections || []);
-      setLinkedInStats(statsRes.data);
+      setLinkedInStats(linkedInStatsRes?.data || null);
+      setXStats(xStatsRes?.data || null);
+      setYoutubeStats(youtubeStatsRes?.data || null);
     } catch (err: unknown) {
       console.error("Failed to fetch settings data:", err);
       setError("Failed to load settings. Please try again.");
@@ -87,8 +116,8 @@ export default function SettingsPage() {
     }
   };
 
-  const handleDisconnect = async (connectionId: string) => {
-    if (!confirm("Are you sure you want to disconnect LinkedIn?")) {
+  const handleDisconnect = async (connectionId: string, platform: string) => {
+    if (!confirm(`Are you sure you want to disconnect ${platform}?`)) {
       return;
     }
 
@@ -102,8 +131,8 @@ export default function SettingsPage() {
     }
   };
 
-  const handleSyncStats = async () => {
-    setIsSyncing(true);
+  const handleSyncLinkedInStats = async () => {
+    setIsSyncingLinkedIn(true);
     setError(null);
     try {
       await api.post("/api/linkedin/stats/sync");
@@ -112,7 +141,35 @@ export default function SettingsPage() {
       console.error("Failed to sync stats:", err);
       setError("Failed to sync LinkedIn stats. Please try again.");
     } finally {
-      setIsSyncing(false);
+      setIsSyncingLinkedIn(false);
+    }
+  };
+
+  const handleSyncXStats = async () => {
+    setIsSyncingX(true);
+    setError(null);
+    try {
+      await api.post("/api/x/stats/sync");
+      fetchData();
+    } catch (err: unknown) {
+      console.error("Failed to sync X stats:", err);
+      setError("Failed to sync X stats. Please try again.");
+    } finally {
+      setIsSyncingX(false);
+    }
+  };
+
+  const handleSyncYouTubeStats = async () => {
+    setIsSyncingYouTube(true);
+    setError(null);
+    try {
+      await api.post("/api/youtube/stats/sync");
+      fetchData();
+    } catch (err: unknown) {
+      console.error("Failed to sync YouTube stats:", err);
+      setError("Failed to sync YouTube stats. Please try again.");
+    } finally {
+      setIsSyncingYouTube(false);
     }
   };
 
@@ -152,7 +209,6 @@ export default function SettingsPage() {
           <div className="border border-gray-200 rounded-lg p-4">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-3">
-                {/* LinkedIn Icon */}
                 <div className="w-10 h-10 bg-[#0077B5] rounded-lg flex items-center justify-center">
                   <svg
                     className="w-6 h-6 text-white"
@@ -181,9 +237,12 @@ export default function SettingsPage() {
                 </div>
               </div>
 
-              <div>
+              <div className="flex items-center gap-2">
                 {linkedInConnection ? (
-                  <div className="flex items-center gap-2">
+                  <>
+                    <span className="px-3 py-1.5 text-sm text-green-600 bg-green-50 rounded-md">
+                      {linkedInConnection.is_expired ? "Expired" : "Active"}
+                    </span>
                     <button
                       onClick={handleConnectLinkedIn}
                       disabled={isConnecting}
@@ -192,20 +251,25 @@ export default function SettingsPage() {
                       Reconnect
                     </button>
                     <button
-                      onClick={() => handleDisconnect(linkedInConnection.id)}
+                      onClick={() => handleDisconnect(linkedInConnection.id, "LinkedIn")}
                       className="px-3 py-1.5 text-sm text-red-600 hover:text-red-700"
                     >
                       Disconnect
                     </button>
-                  </div>
+                  </>
                 ) : (
-                  <button
-                    onClick={handleConnectLinkedIn}
-                    disabled={isConnecting}
-                    className="px-4 py-2 bg-[#0077B5] text-white text-sm font-medium rounded-md hover:bg-[#006097] disabled:opacity-50"
-                  >
-                    {isConnecting ? "Connecting..." : "Connect LinkedIn"}
-                  </button>
+                  <>
+                    <span className="px-3 py-1.5 text-sm text-gray-500 bg-gray-50 rounded-md">
+                      Not connected
+                    </span>
+                    <button
+                      onClick={handleConnectLinkedIn}
+                      disabled={isConnecting}
+                      className="px-4 py-2 bg-[#0077B5] text-white text-sm font-medium rounded-md hover:bg-[#006097] disabled:opacity-50"
+                    >
+                      {isConnecting ? "Connecting..." : "Connect"}
+                    </button>
+                  </>
                 )}
               </div>
             </div>
@@ -218,11 +282,11 @@ export default function SettingsPage() {
                     Organization Stats
                   </h4>
                   <button
-                    onClick={handleSyncStats}
-                    disabled={isSyncing}
+                    onClick={handleSyncLinkedInStats}
+                    disabled={isSyncingLinkedIn}
                     className="px-3 py-1 text-xs text-blue-600 hover:text-blue-700 disabled:opacity-50"
                   >
-                    {isSyncing ? "Syncing..." : "Sync Now"}
+                    {isSyncingLinkedIn ? "Syncing..." : "Sync Now"}
                   </button>
                 </div>
                 <div className="grid grid-cols-2 gap-4">
@@ -267,6 +331,176 @@ export default function SettingsPage() {
             )}
           </div>
 
+          {/* X/Twitter Connection */}
+          <div className="border border-gray-200 rounded-lg p-4">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 bg-black rounded-lg flex items-center justify-center">
+                  <svg
+                    className="w-6 h-6 text-white"
+                    viewBox="0 0 24 24"
+                    fill="currentColor"
+                  >
+                    <path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24h-6.514l-5.106-6.694-5.934 6.694H2.88l7.644-8.74-8.179-10.766h6.504l4.632 6.12L18.244 2.25zm-1.161 17.52h1.833L7.084 4.126H5.117z" />
+                  </svg>
+                </div>
+                <div>
+                  <h3 className="font-medium text-gray-900">X (Twitter)</h3>
+                  {xStats?.connected ? (
+                    <p className="text-sm text-gray-500">
+                      Connected as @{xStats.account_handle}
+                    </p>
+                  ) : (
+                    <p className="text-sm text-gray-500">
+                      Pending configuration
+                    </p>
+                  )}
+                </div>
+              </div>
+
+              <div>
+                {xStats?.connected ? (
+                  <span className="px-3 py-1.5 text-sm text-green-600 bg-green-50 rounded-md">
+                    Active
+                  </span>
+                ) : (
+                  <span className="px-3 py-1.5 text-sm text-gray-500 bg-gray-50 rounded-md">
+                    Pending
+                  </span>
+                )}
+              </div>
+            </div>
+
+            {/* Stats section - only show if connected */}
+            {xStats?.connected && (
+              <div className="mt-4 pt-4 border-t border-gray-100">
+                <div className="flex items-center justify-between mb-3">
+                  <h4 className="text-sm font-medium text-gray-700">
+                    Account Stats
+                  </h4>
+                  <button
+                    onClick={handleSyncXStats}
+                    disabled={isSyncingX}
+                    className="px-3 py-1 text-xs text-blue-600 hover:text-blue-700 disabled:opacity-50"
+                  >
+                    {isSyncingX ? "Syncing..." : "Sync Now"}
+                  </button>
+                </div>
+                <div className="grid grid-cols-3 gap-4">
+                  <div className="bg-gray-50 rounded-lg p-3">
+                    <div className="text-2xl font-bold text-gray-900">
+                      {xStats.follower_count.toLocaleString()}
+                    </div>
+                    <div className="text-xs text-gray-500">Followers</div>
+                  </div>
+                  <div className="bg-gray-50 rounded-lg p-3">
+                    <div className="text-2xl font-bold text-gray-900">
+                      {xStats.tweet_count.toLocaleString()}
+                    </div>
+                    <div className="text-xs text-gray-500">Tweets</div>
+                  </div>
+                  <div className="bg-gray-50 rounded-lg p-3">
+                    <div className="text-2xl font-bold text-gray-900">
+                      {xStats.following_count.toLocaleString()}
+                    </div>
+                    <div className="text-xs text-gray-500">Following</div>
+                  </div>
+                </div>
+                {xStats.last_synced_at && (
+                  <p className="text-xs text-gray-400 mt-2">
+                    Last synced:{" "}
+                    {new Date(xStats.last_synced_at).toLocaleString()}
+                  </p>
+                )}
+              </div>
+            )}
+          </div>
+
+          {/* YouTube Connection */}
+          <div className="border border-gray-200 rounded-lg p-4">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 bg-[#FF0000] rounded-lg flex items-center justify-center">
+                  <svg
+                    className="w-6 h-6 text-white"
+                    viewBox="0 0 24 24"
+                    fill="currentColor"
+                  >
+                    <path d="M23.498 6.186a3.016 3.016 0 0 0-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 0 0 .502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 0 0 2.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814zM9.545 15.568V8.432L15.818 12l-6.273 3.568z" />
+                  </svg>
+                </div>
+                <div>
+                  <h3 className="font-medium text-gray-900">YouTube</h3>
+                  {youtubeStats?.connected ? (
+                    <p className="text-sm text-gray-500">
+                      Connected as {youtubeStats.channel_title || youtubeStats.custom_url}
+                    </p>
+                  ) : (
+                    <p className="text-sm text-gray-500">
+                      Pending configuration
+                    </p>
+                  )}
+                </div>
+              </div>
+
+              <div>
+                {youtubeStats?.connected ? (
+                  <span className="px-3 py-1.5 text-sm text-green-600 bg-green-50 rounded-md">
+                    Active
+                  </span>
+                ) : (
+                  <span className="px-3 py-1.5 text-sm text-gray-500 bg-gray-50 rounded-md">
+                    Pending
+                  </span>
+                )}
+              </div>
+            </div>
+
+            {/* Stats section - only show if connected */}
+            {youtubeStats?.connected && (
+              <div className="mt-4 pt-4 border-t border-gray-100">
+                <div className="flex items-center justify-between mb-3">
+                  <h4 className="text-sm font-medium text-gray-700">
+                    Channel Stats
+                  </h4>
+                  <button
+                    onClick={handleSyncYouTubeStats}
+                    disabled={isSyncingYouTube}
+                    className="px-3 py-1 text-xs text-blue-600 hover:text-blue-700 disabled:opacity-50"
+                  >
+                    {isSyncingYouTube ? "Syncing..." : "Sync Now"}
+                  </button>
+                </div>
+                <div className="grid grid-cols-3 gap-4">
+                  <div className="bg-gray-50 rounded-lg p-3">
+                    <div className="text-2xl font-bold text-gray-900">
+                      {youtubeStats.subscriber_count.toLocaleString()}
+                    </div>
+                    <div className="text-xs text-gray-500">Subscribers</div>
+                  </div>
+                  <div className="bg-gray-50 rounded-lg p-3">
+                    <div className="text-2xl font-bold text-gray-900">
+                      {youtubeStats.view_count.toLocaleString()}
+                    </div>
+                    <div className="text-xs text-gray-500">Total Views</div>
+                  </div>
+                  <div className="bg-gray-50 rounded-lg p-3">
+                    <div className="text-2xl font-bold text-gray-900">
+                      {youtubeStats.video_count.toLocaleString()}
+                    </div>
+                    <div className="text-xs text-gray-500">Videos</div>
+                  </div>
+                </div>
+                {youtubeStats.last_synced_at && (
+                  <p className="text-xs text-gray-400 mt-2">
+                    Last synced:{" "}
+                    {new Date(youtubeStats.last_synced_at).toLocaleString()}
+                  </p>
+                )}
+              </div>
+            )}
+          </div>
+
           {/* Info Box */}
           <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
             <h4 className="text-sm font-medium text-blue-800 mb-1">
@@ -275,7 +509,8 @@ export default function SettingsPage() {
             <p className="text-sm text-blue-700">
               Connecting platforms allows MediaHub to fetch analytics directly
               from platform APIs. This provides accurate stats for CHM&apos;s
-              official channels. Currently supports LinkedIn organization stats.
+              official channels. LinkedIn uses OAuth, X uses a bearer token,
+              and YouTube uses an API key — both configured on the server.
             </p>
           </div>
         </div>

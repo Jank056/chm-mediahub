@@ -35,6 +35,9 @@ aiosmtplib>=3.0.0
 python-dotenv>=1.0.0
 pyyaml>=6.0.0
 
+# Background tasks
+apscheduler>=3.10.0
+
 # Report Automation Dependencies
 python-pptx>=0.6.23
 pandas>=2.0.0

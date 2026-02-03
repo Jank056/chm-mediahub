@@ -14,7 +14,8 @@ from database import Base
 class Platform(str, enum.Enum):
     """Supported platforms for OAuth connections."""
     LINKEDIN = "linkedin"
-    # Future: YOUTUBE = "youtube", X = "x"
+    X = "x"
+    YOUTUBE = "youtube"
 
 
 class PlatformConnection(Base):
@@ -117,3 +118,94 @@ class LinkedInOrgStats(Base):
 
     def __repr__(self) -> str:
         return f"<LinkedInOrgStats {self.org_urn}: {self.follower_count} followers>"
+
+
+class XAccountStats(Base):
+    """Cached X/Twitter account statistics.
+
+    Stores fetched stats to avoid hitting API rate limits.
+    """
+
+    __tablename__ = "x_account_stats"
+
+    id: Mapped[str] = mapped_column(
+        UUID(as_uuid=False),
+        primary_key=True,
+        default=lambda: str(uuid4())
+    )
+    account_handle: Mapped[str] = mapped_column(
+        String(255), nullable=False, unique=True
+    )
+
+    # Stats
+    follower_count: Mapped[int] = mapped_column(Integer, default=0)
+    tweet_count: Mapped[int] = mapped_column(Integer, default=0)
+    following_count: Mapped[int] = mapped_column(Integer, default=0)
+    listed_count: Mapped[int] = mapped_column(Integer, default=0)
+
+    # Sync metadata
+    last_synced_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+        nullable=False
+    )
+
+    def __repr__(self) -> str:
+        return f"<XAccountStats @{self.account_handle}: {self.follower_count} followers>"
+
+
+class YouTubeChannelStats(Base):
+    """Cached YouTube channel statistics.
+
+    Stores fetched stats to avoid hitting API quota.
+    """
+
+    __tablename__ = "youtube_channel_stats"
+
+    id: Mapped[str] = mapped_column(
+        UUID(as_uuid=False),
+        primary_key=True,
+        default=lambda: str(uuid4())
+    )
+    channel_id: Mapped[str] = mapped_column(
+        String(255), nullable=False, unique=True
+    )
+    channel_title: Mapped[str | None] = mapped_column(
+        String(255), nullable=True
+    )
+    custom_url: Mapped[str | None] = mapped_column(
+        String(255), nullable=True
+    )
+
+    # Stats
+    subscriber_count: Mapped[int] = mapped_column(Integer, default=0)
+    view_count: Mapped[int] = mapped_column(Integer, default=0)
+    video_count: Mapped[int] = mapped_column(Integer, default=0)
+
+    # Sync metadata
+    last_synced_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+        nullable=False
+    )
+
+    def __repr__(self) -> str:
+        return f"<YouTubeChannelStats {self.channel_title}: {self.subscriber_count} subscribers>"

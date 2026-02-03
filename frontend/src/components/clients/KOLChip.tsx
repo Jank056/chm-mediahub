@@ -7,9 +7,10 @@ interface KOLChipProps {
   kol: KOLSummary;
   showDetails?: boolean;
   onClick?: () => void;
+  size?: "sm" | "md" | "lg";
 }
 
-export function KOLChip({ kol, showDetails = false, onClick }: KOLChipProps) {
+export function KOLChip({ kol, showDetails = false, onClick, size = "sm" }: KOLChipProps) {
   const Wrapper = onClick ? "button" : "div";
 
   return (
@@ -19,7 +20,7 @@ export function KOLChip({ kol, showDetails = false, onClick }: KOLChipProps) {
         onClick ? "hover:bg-gray-100 cursor-pointer transition-colors" : ""
       }`}
     >
-      <Avatar name={kol.name} imageUrl={kol.photo_url} size="sm" />
+      <Avatar name={kol.name} imageUrl={kol.photo_url} size={size} />
       <div className="text-left">
         <span className="text-sm font-medium text-gray-900">{kol.name}</span>
         {showDetails && kol.specialty && (

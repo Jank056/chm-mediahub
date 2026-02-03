@@ -21,8 +21,11 @@ from routers import (
     reports_router,
     users_router,
     webhook_router,
+    x_router,
+    youtube_router,
 )
 from services.redis_store import RedisStore
+from services.scheduler import start_scheduler, stop_scheduler
 from middleware.rate_limit import limiter
 
 settings = get_settings()
@@ -48,9 +51,13 @@ async def lifespan(app: FastAPI):
         print("  Set JWT_SECRET environment variable to a secure random value.")
         # Don't exit - just warn loudly
 
+    # Start background scheduler for periodic tasks
+    start_scheduler()
+
     yield
 
-    # Shutdown: close Redis connection pool
+    # Shutdown: stop scheduler and close Redis connection pool
+    stop_scheduler()
     await RedisStore.close()
 
 
@@ -84,6 +91,8 @@ app.include_router(oauth_router)
 app.include_router(reports_router)
 app.include_router(users_router)
 app.include_router(webhook_router)
+app.include_router(x_router)
+app.include_router(youtube_router)
 
 
 @app.get("/health")
