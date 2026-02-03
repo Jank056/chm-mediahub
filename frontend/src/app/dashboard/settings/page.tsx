@@ -197,10 +197,10 @@ export default function SettingsPage() {
       <div className="bg-white rounded-lg shadow mb-8">
         <div className="px-6 py-4 border-b border-gray-200">
           <h2 className="text-lg font-semibold text-gray-900">
-            Platform Connections
+            Official CHM Channels
           </h2>
           <p className="text-sm text-gray-500 mt-1">
-            Connect platforms to fetch analytics directly from their APIs.
+            API connections to Community Health Media&apos;s official social accounts.
           </p>
         </div>
 
@@ -219,7 +219,12 @@ export default function SettingsPage() {
                   </svg>
                 </div>
                 <div>
-                  <h3 className="font-medium text-gray-900">LinkedIn</h3>
+                  <h3 className="font-medium text-gray-900">
+                    <a href="https://www.linkedin.com/company/community-health-media" target="_blank" rel="noopener noreferrer" className="hover:text-[#0077B5] transition-colors inline-flex items-center gap-1">
+                      LinkedIn
+                      <svg className="w-3 h-3 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" /></svg>
+                    </a>
+                  </h3>
                   {linkedInConnection ? (
                     <p className="text-sm text-gray-500">
                       Connected as{" "}
@@ -345,7 +350,12 @@ export default function SettingsPage() {
                   </svg>
                 </div>
                 <div>
-                  <h3 className="font-medium text-gray-900">X (Twitter)</h3>
+                  <h3 className="font-medium text-gray-900">
+                    <a href="https://x.com/hlthinourhands" target="_blank" rel="noopener noreferrer" className="hover:text-gray-600 transition-colors inline-flex items-center gap-1">
+                      X (Twitter)
+                      <svg className="w-3 h-3 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" /></svg>
+                    </a>
+                  </h3>
                   {xStats?.connected ? (
                     <p className="text-sm text-gray-500">
                       Connected as @{xStats.account_handle}
@@ -430,7 +440,12 @@ export default function SettingsPage() {
                   </svg>
                 </div>
                 <div>
-                  <h3 className="font-medium text-gray-900">YouTube</h3>
+                  <h3 className="font-medium text-gray-900">
+                    <a href="https://www.youtube.com/@CommunityHealthMedia" target="_blank" rel="noopener noreferrer" className="hover:text-[#FF0000] transition-colors inline-flex items-center gap-1">
+                      YouTube
+                      <svg className="w-3 h-3 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" /></svg>
+                    </a>
+                  </h3>
                   {youtubeStats?.connected ? (
                     <p className="text-sm text-gray-500">
                       Connected as {youtubeStats.channel_title || youtubeStats.custom_url}
