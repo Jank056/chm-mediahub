@@ -19,7 +19,14 @@ from models.kol import KOL, KOLGroup, KOLGroupMember
 from models.client_user import ClientUser, ClientRole
 
 # Platform connections
-from models.platform_connection import PlatformConnection, Platform, LinkedInOrgStats, XAccountStats, YouTubeChannelStats
+from models.platform_connection import (
+    PlatformConnection, Platform,
+    LinkedInOrgStats, XAccountStats, YouTubeChannelStats,
+    FacebookPageStats, InstagramAccountStats,
+)
+
+# Metrics
+from models.metric_snapshot import MetricSnapshot
 
 __all__ = [
     # Base
@@ -49,4 +56,8 @@ __all__ = [
     "LinkedInOrgStats",
     "XAccountStats",
     "YouTubeChannelStats",
+    "FacebookPageStats",
+    "InstagramAccountStats",
+    # Metrics
+    "MetricSnapshot",
 ]

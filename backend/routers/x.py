@@ -13,12 +13,16 @@ from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from sqlalchemy import desc
+
 from config import get_settings
 from database import get_db
 from middleware.auth import get_current_active_user, require_roles
 from models.user import User, UserRole
+from models.post import Post
 from models.platform_connection import XAccountStats
 from services.x_service import fetch_account_stats, fetch_recent_tweets
+from services.channel_sync import sync_x_posts
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/x", tags=["x"])
@@ -209,3 +213,65 @@ async def get_recent_tweets(
         account_handle=handle,
         tweets=[TweetResponse(**t) for t in tweets],
     )
+
+
+# --- Post sync/list endpoints ---
+
+
+class PostSyncResponse(BaseModel):
+    message: str
+    posts_processed: int
+
+
+class StoredTweetResponse(BaseModel):
+    id: str
+    provider_post_id: str | None
+    description: str | None
+    posted_at: datetime | None
+    like_count: int
+    comment_count: int
+    share_count: int
+    impression_count: int
+    stats_synced_at: datetime | None
+
+
+@router.post("/posts/sync", response_model=PostSyncResponse)
+async def trigger_x_post_sync(
+    current_user: Annotated[User, Depends(require_roles(UserRole.ADMIN, UserRole.SUPERADMIN))],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    """Manually trigger X post discovery + stats sync (admin only)."""
+    count = await sync_x_posts(db)
+    return PostSyncResponse(message="X posts synced", posts_processed=count)
+
+
+@router.get("/posts", response_model=list[StoredTweetResponse])
+async def list_x_posts(
+    current_user: Annotated[User, Depends(get_current_active_user)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+    limit: int = 50,
+    offset: int = 0,
+):
+    """List stored official X account posts."""
+    query = (
+        select(Post)
+        .where(Post.platform == "x", Post.source == "direct")
+        .order_by(desc(Post.posted_at))
+        .limit(limit)
+        .offset(offset)
+    )
+    result = await db.execute(query)
+    return [
+        StoredTweetResponse(
+            id=p.id,
+            provider_post_id=p.provider_post_id,
+            description=p.description,
+            posted_at=p.posted_at,
+            like_count=p.like_count,
+            comment_count=p.comment_count,
+            share_count=p.share_count,
+            impression_count=p.impression_count,
+            stats_synced_at=p.stats_synced_at,
+        )
+        for p in result.scalars()
+    ]

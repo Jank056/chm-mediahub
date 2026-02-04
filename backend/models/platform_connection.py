@@ -16,6 +16,8 @@ class Platform(str, enum.Enum):
     LINKEDIN = "linkedin"
     X = "x"
     YOUTUBE = "youtube"
+    FACEBOOK = "facebook"
+    INSTAGRAM = "instagram"
 
 
 class PlatformConnection(Base):
@@ -209,3 +211,80 @@ class YouTubeChannelStats(Base):
 
     def __repr__(self) -> str:
         return f"<YouTubeChannelStats {self.channel_title}: {self.subscriber_count} subscribers>"
+
+
+class FacebookPageStats(Base):
+    """Cached Facebook Page statistics."""
+
+    __tablename__ = "facebook_page_stats"
+
+    id: Mapped[str] = mapped_column(
+        UUID(as_uuid=False),
+        primary_key=True,
+        default=lambda: str(uuid4())
+    )
+    page_id: Mapped[str] = mapped_column(String(255), nullable=False, unique=True)
+    page_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+
+    # Stats
+    follower_count: Mapped[int] = mapped_column(Integer, default=0)
+    fan_count: Mapped[int] = mapped_column(Integer, default=0)
+
+    # Sync metadata
+    last_synced_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+        nullable=False
+    )
+
+    def __repr__(self) -> str:
+        return f"<FacebookPageStats {self.page_name}: {self.follower_count} followers>"
+
+
+class InstagramAccountStats(Base):
+    """Cached Instagram Business account statistics."""
+
+    __tablename__ = "instagram_account_stats"
+
+    id: Mapped[str] = mapped_column(
+        UUID(as_uuid=False),
+        primary_key=True,
+        default=lambda: str(uuid4())
+    )
+    ig_account_id: Mapped[str] = mapped_column(
+        String(255), nullable=False, unique=True
+    )
+    username: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+
+    # Stats
+    follower_count: Mapped[int] = mapped_column(Integer, default=0)
+    media_count: Mapped[int] = mapped_column(Integer, default=0)
+
+    # Sync metadata
+    last_synced_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+        nullable=False
+    )
+
+    def __repr__(self) -> str:
+        return f"<InstagramAccountStats @{self.username}: {self.follower_count} followers>"

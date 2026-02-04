@@ -8,11 +8,13 @@ import {
   type ShootMetrics,
   type PlatformStats,
   type TimelineEntry,
+  type TrendEntry,
 } from "@/lib/api";
 import {
   StatCard,
   PlatformChart,
   TimelineChart,
+  TrendsChart,
   PostsTable,
   ShootsGrid,
   FilterBar,
@@ -24,25 +26,28 @@ export default function AnalyticsPage() {
   const [shoots, setShoots] = useState<ShootMetrics[]>([]);
   const [platforms, setPlatforms] = useState<PlatformStats[]>([]);
   const [timeline, setTimeline] = useState<TimelineEntry[]>([]);
+  const [followerTrends, setFollowerTrends] = useState<{ label: string; data: TrendEntry[]; color: string }[]>([]);
 
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   const [selectedPlatform, setSelectedPlatform] = useState<string | null>(null);
   const [dateRange, setDateRange] = useState(30);
+  const [sourceFilter, setSourceFilter] = useState<"official" | "branded" | null>(null);
 
   useEffect(() => {
     const fetchData = async () => {
       setIsLoading(true);
       try {
+        const sourceParam = sourceFilter || undefined;
         // Fetch all data in parallel
         const [summaryData, postsData, shootsData, platformsData, timelineData] =
           await Promise.all([
-            analyticsApi.getSummary(),
-            analyticsApi.getTopPosts({ limit: 10, platform: selectedPlatform || undefined }),
+            analyticsApi.getSummary({ source: sourceParam }),
+            analyticsApi.getTopPosts({ limit: 10, platform: selectedPlatform || undefined, source: sourceParam }),
             analyticsApi.getShoots({ sort_by: "views" }),
-            analyticsApi.getPlatforms(),
-            analyticsApi.getTimeline({ days: dateRange, platform: selectedPlatform || undefined }),
+            analyticsApi.getPlatforms({ source: sourceParam }),
+            analyticsApi.getTimeline({ days: dateRange, platform: selectedPlatform || undefined, source: sourceParam }),
           ]);
 
         setSummary(summaryData);
@@ -50,6 +55,24 @@ export default function AnalyticsPage() {
         setShoots(shootsData);
         setPlatforms(platformsData);
         setTimeline(timelineData);
+
+        // Fetch follower/subscriber growth trends (fire-and-forget style)
+        const trendConfigs = [
+          { platform: "youtube", metric: "subscriber_count", label: "YouTube Subscribers", color: "#FF0000" },
+          { platform: "x", metric: "follower_count", label: "X Followers", color: "#000000" },
+          { platform: "linkedin", metric: "follower_count", label: "LinkedIn Followers", color: "#0077B5" },
+          { platform: "facebook", metric: "follower_count", label: "Facebook Followers", color: "#1877F2" },
+          { platform: "instagram", metric: "follower_count", label: "Instagram Followers", color: "#E4405F" },
+        ];
+        const trendResults = await Promise.all(
+          trendConfigs.map((cfg) =>
+            analyticsApi.getTrends({ platform: cfg.platform, metric_name: cfg.metric, days: dateRange })
+              .then((data) => ({ ...cfg, data }))
+              .catch(() => ({ ...cfg, data: [] as TrendEntry[] }))
+          )
+        );
+        setFollowerTrends(trendResults.filter((t) => t.data.length > 0));
+
         setError(null);
       } catch (err) {
         console.error("Failed to fetch analytics:", err);
@@ -60,7 +83,7 @@ export default function AnalyticsPage() {
     };
 
     fetchData();
-  }, [selectedPlatform, dateRange]);
+  }, [selectedPlatform, dateRange, sourceFilter]);
 
   const formatLastUpdated = (dateStr: string | null) => {
     if (!dateStr) return "Never synced";
@@ -107,6 +130,27 @@ export default function AnalyticsPage() {
         </div>
       )}
 
+      {/* Source Toggle */}
+      <div className="flex gap-1 bg-gray-100 rounded-lg p-1 w-fit">
+        {([
+          { value: null, label: "All Content" },
+          { value: "official" as const, label: "Official Channels" },
+          { value: "branded" as const, label: "Branded Accounts" },
+        ]).map((opt) => (
+          <button
+            key={opt.label}
+            onClick={() => setSourceFilter(opt.value)}
+            className={`px-4 py-1.5 text-sm font-medium rounded-md transition-colors ${
+              sourceFilter === opt.value
+                ? "bg-white text-gray-900 shadow-sm"
+                : "text-gray-500 hover:text-gray-700"
+            }`}
+          >
+            {opt.label}
+          </button>
+        ))}
+      </div>
+
       {/* Filter Bar */}
       <FilterBar
         platforms={availablePlatforms}
@@ -144,6 +188,11 @@ export default function AnalyticsPage() {
         {timeline.length > 0 && <TimelineChart data={timeline} metric="views" />}
         {platforms.length > 0 && <PlatformChart data={platforms} />}
       </div>
+
+      {/* Growth Trends */}
+      {followerTrends.length > 0 && (
+        <TrendsChart series={followerTrends} title="Follower Growth" />
+      )}
 
       {/* Top Posts Table */}
       {topPosts.length > 0 && (

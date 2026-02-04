@@ -1,22 +1,30 @@
-"""Post model - stores platform posts with engagement metrics from ops-console."""
+"""Post model - stores platform posts with engagement metrics.
+
+Posts come from two sources:
+- "webhook": branded posts synced from ops-console
+- "direct": official channel posts fetched directly by MediaHub
+"""
 
 from datetime import datetime
 from typing import Optional
 
-from sqlalchemy import DateTime, ForeignKey, Integer, String, Text, func
+from sqlalchemy import DateTime, ForeignKey, Integer, String, Text, UniqueConstraint, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from database import Base
 
 
 class Post(Base):
-    """Platform post with engagement metrics, synced from ops-console."""
+    """Platform post with engagement metrics."""
 
     __tablename__ = "posts"
+    __table_args__ = (
+        UniqueConstraint("platform", "provider_post_id", name="uix_posts_platform_provider"),
+    )
 
     id: Mapped[str] = mapped_column(String(255), primary_key=True)
 
-    # Foreign keys
+    # Foreign keys (NULL for official channel posts)
     clip_id: Mapped[Optional[str]] = mapped_column(
         String(255),
         ForeignKey("clips.id", ondelete="SET NULL"),
@@ -34,6 +42,9 @@ class Post(Base):
     title: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
     description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     posted_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    # Source: "webhook" (from ops-console) or "direct" (fetched by MediaHub)
+    source: Mapped[str] = mapped_column(String(20), default="webhook")
 
     # Engagement metrics
     view_count: Mapped[int] = mapped_column(Integer, default=0)

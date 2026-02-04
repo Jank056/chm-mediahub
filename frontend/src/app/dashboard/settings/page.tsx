@@ -44,31 +44,58 @@ interface YouTubeStats {
   last_synced_at: string | null;
 }
 
+interface FacebookStats {
+  connected: boolean;
+  page_id: string | null;
+  page_name: string | null;
+  follower_count: number;
+  fan_count: number;
+  last_synced_at: string | null;
+}
+
+interface InstagramStats {
+  connected: boolean;
+  ig_account_id: string | null;
+  username: string | null;
+  name: string | null;
+  follower_count: number;
+  media_count: number;
+  last_synced_at: string | null;
+}
+
 export default function SettingsPage() {
   const [connections, setConnections] = useState<PlatformConnection[]>([]);
   const [linkedInStats, setLinkedInStats] = useState<LinkedInStats | null>(null);
   const [xStats, setXStats] = useState<XStats | null>(null);
   const [youtubeStats, setYoutubeStats] = useState<YouTubeStats | null>(null);
+  const [facebookStats, setFacebookStats] = useState<FacebookStats | null>(null);
+  const [instagramStats, setInstagramStats] = useState<InstagramStats | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isConnecting, setIsConnecting] = useState(false);
   const [isSyncingLinkedIn, setIsSyncingLinkedIn] = useState(false);
   const [isSyncingX, setIsSyncingX] = useState(false);
   const [isSyncingYouTube, setIsSyncingYouTube] = useState(false);
+  const [isSyncingFacebook, setIsSyncingFacebook] = useState(false);
+  const [isSyncingInstagram, setIsSyncingInstagram] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const fetchData = async () => {
     try {
       setError(null);
-      const [connectionsRes, linkedInStatsRes, xStatsRes, youtubeStatsRes] = await Promise.all([
+      const [connectionsRes, linkedInStatsRes, xStatsRes, youtubeStatsRes, facebookStatsRes, instagramStatsRes] = await Promise.all([
         api.get("/api/oauth/connections"),
         api.get("/api/linkedin/stats").catch(() => null),
         api.get("/api/x/stats").catch(() => null),
         api.get("/api/youtube/stats").catch(() => null),
+        api.get("/api/facebook/stats").catch(() => null),
+        api.get("/api/instagram/stats").catch(() => null),
       ]);
       setConnections(connectionsRes.data.connections || []);
       setLinkedInStats(linkedInStatsRes?.data || null);
       setXStats(xStatsRes?.data || null);
       setYoutubeStats(youtubeStatsRes?.data || null);
+      setFacebookStats(facebookStatsRes?.data || null);
+      setInstagramStats(instagramStatsRes?.data || null);
     } catch (err: unknown) {
       console.error("Failed to fetch settings data:", err);
       setError("Failed to load settings. Please try again.");
@@ -170,6 +197,34 @@ export default function SettingsPage() {
       setError("Failed to sync YouTube stats. Please try again.");
     } finally {
       setIsSyncingYouTube(false);
+    }
+  };
+
+  const handleSyncFacebookStats = async () => {
+    setIsSyncingFacebook(true);
+    setError(null);
+    try {
+      await api.post("/api/facebook/stats/sync");
+      fetchData();
+    } catch (err: unknown) {
+      console.error("Failed to sync Facebook stats:", err);
+      setError("Failed to sync Facebook stats. Please try again.");
+    } finally {
+      setIsSyncingFacebook(false);
+    }
+  };
+
+  const handleSyncInstagramStats = async () => {
+    setIsSyncingInstagram(true);
+    setError(null);
+    try {
+      await api.post("/api/instagram/stats/sync");
+      fetchData();
+    } catch (err: unknown) {
+      console.error("Failed to sync Instagram stats:", err);
+      setError("Failed to sync Instagram stats. Please try again.");
+    } finally {
+      setIsSyncingInstagram(false);
     }
   };
 
@@ -516,6 +571,164 @@ export default function SettingsPage() {
             )}
           </div>
 
+          {/* Facebook Connection */}
+          <div className="border border-gray-200 rounded-lg p-4">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 bg-[#1877F2] rounded-lg flex items-center justify-center">
+                  <svg
+                    className="w-6 h-6 text-white"
+                    viewBox="0 0 24 24"
+                    fill="currentColor"
+                  >
+                    <path d="M24 12.073c0-6.627-5.373-12-12-12s-12 5.373-12 12c0 5.99 4.388 10.954 10.125 11.854v-8.385H7.078v-3.47h3.047V9.43c0-3.007 1.792-4.669 4.533-4.669 1.312 0 2.686.235 2.686.235v2.953H15.83c-1.491 0-1.956.925-1.956 1.874v2.25h3.328l-.532 3.47h-2.796v8.385C19.612 23.027 24 18.062 24 12.073z" />
+                  </svg>
+                </div>
+                <div>
+                  <h3 className="font-medium text-gray-900">Facebook</h3>
+                  {facebookStats?.connected ? (
+                    <p className="text-sm text-gray-500">
+                      Connected as {facebookStats.page_name || facebookStats.page_id}
+                    </p>
+                  ) : (
+                    <p className="text-sm text-gray-500">
+                      Pending configuration
+                    </p>
+                  )}
+                </div>
+              </div>
+
+              <div>
+                {facebookStats?.connected ? (
+                  <span className="px-3 py-1.5 text-sm text-green-600 bg-green-50 rounded-md">
+                    Active
+                  </span>
+                ) : (
+                  <span className="px-3 py-1.5 text-sm text-gray-500 bg-gray-50 rounded-md">
+                    Pending
+                  </span>
+                )}
+              </div>
+            </div>
+
+            {/* Stats section - only show if connected */}
+            {facebookStats?.connected && (
+              <div className="mt-4 pt-4 border-t border-gray-100">
+                <div className="flex items-center justify-between mb-3">
+                  <h4 className="text-sm font-medium text-gray-700">
+                    Page Stats
+                  </h4>
+                  <button
+                    onClick={handleSyncFacebookStats}
+                    disabled={isSyncingFacebook}
+                    className="px-3 py-1 text-xs text-blue-600 hover:text-blue-700 disabled:opacity-50"
+                  >
+                    {isSyncingFacebook ? "Syncing..." : "Sync Now"}
+                  </button>
+                </div>
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="bg-gray-50 rounded-lg p-3">
+                    <div className="text-2xl font-bold text-gray-900">
+                      {facebookStats.follower_count.toLocaleString()}
+                    </div>
+                    <div className="text-xs text-gray-500">Followers</div>
+                  </div>
+                  <div className="bg-gray-50 rounded-lg p-3">
+                    <div className="text-2xl font-bold text-gray-900">
+                      {facebookStats.fan_count.toLocaleString()}
+                    </div>
+                    <div className="text-xs text-gray-500">Page Likes</div>
+                  </div>
+                </div>
+                {facebookStats.last_synced_at && (
+                  <p className="text-xs text-gray-400 mt-2">
+                    Last synced:{" "}
+                    {new Date(facebookStats.last_synced_at).toLocaleString()}
+                  </p>
+                )}
+              </div>
+            )}
+          </div>
+
+          {/* Instagram Connection */}
+          <div className="border border-gray-200 rounded-lg p-4">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 bg-gradient-to-tr from-[#F58529] via-[#DD2A7B] to-[#8134AF] rounded-lg flex items-center justify-center">
+                  <svg
+                    className="w-6 h-6 text-white"
+                    viewBox="0 0 24 24"
+                    fill="currentColor"
+                  >
+                    <path d="M12 2.163c3.204 0 3.584.012 4.85.07 3.252.148 4.771 1.691 4.919 4.919.058 1.265.069 1.645.069 4.849 0 3.205-.012 3.584-.069 4.849-.149 3.225-1.664 4.771-4.919 4.919-1.266.058-1.644.07-4.85.07-3.204 0-3.584-.012-4.849-.07-3.26-.149-4.771-1.699-4.919-4.92-.058-1.265-.07-1.644-.07-4.849 0-3.204.013-3.583.07-4.849.149-3.227 1.664-4.771 4.919-4.919 1.266-.057 1.645-.069 4.849-.069zM12 0C8.741 0 8.333.014 7.053.072 2.695.272.273 2.69.073 7.052.014 8.333 0 8.741 0 12c0 3.259.014 3.668.072 4.948.2 4.358 2.618 6.78 6.98 6.98C8.333 23.986 8.741 24 12 24c3.259 0 3.668-.014 4.948-.072 4.354-.2 6.782-2.618 6.979-6.98.059-1.28.073-1.689.073-4.948 0-3.259-.014-3.667-.072-4.947-.196-4.354-2.617-6.78-6.979-6.98C15.668.014 15.259 0 12 0zm0 5.838a6.162 6.162 0 100 12.324 6.162 6.162 0 000-12.324zM12 16a4 4 0 110-8 4 4 0 010 8zm6.406-11.845a1.44 1.44 0 100 2.881 1.44 1.44 0 000-2.881z" />
+                  </svg>
+                </div>
+                <div>
+                  <h3 className="font-medium text-gray-900">Instagram</h3>
+                  {instagramStats?.connected ? (
+                    <p className="text-sm text-gray-500">
+                      Connected as @{instagramStats.username || instagramStats.name}
+                    </p>
+                  ) : (
+                    <p className="text-sm text-gray-500">
+                      Pending configuration
+                    </p>
+                  )}
+                </div>
+              </div>
+
+              <div>
+                {instagramStats?.connected ? (
+                  <span className="px-3 py-1.5 text-sm text-green-600 bg-green-50 rounded-md">
+                    Active
+                  </span>
+                ) : (
+                  <span className="px-3 py-1.5 text-sm text-gray-500 bg-gray-50 rounded-md">
+                    Pending
+                  </span>
+                )}
+              </div>
+            </div>
+
+            {/* Stats section - only show if connected */}
+            {instagramStats?.connected && (
+              <div className="mt-4 pt-4 border-t border-gray-100">
+                <div className="flex items-center justify-between mb-3">
+                  <h4 className="text-sm font-medium text-gray-700">
+                    Account Stats
+                  </h4>
+                  <button
+                    onClick={handleSyncInstagramStats}
+                    disabled={isSyncingInstagram}
+                    className="px-3 py-1 text-xs text-blue-600 hover:text-blue-700 disabled:opacity-50"
+                  >
+                    {isSyncingInstagram ? "Syncing..." : "Sync Now"}
+                  </button>
+                </div>
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="bg-gray-50 rounded-lg p-3">
+                    <div className="text-2xl font-bold text-gray-900">
+                      {instagramStats.follower_count.toLocaleString()}
+                    </div>
+                    <div className="text-xs text-gray-500">Followers</div>
+                  </div>
+                  <div className="bg-gray-50 rounded-lg p-3">
+                    <div className="text-2xl font-bold text-gray-900">
+                      {instagramStats.media_count.toLocaleString()}
+                    </div>
+                    <div className="text-xs text-gray-500">Posts</div>
+                  </div>
+                </div>
+                {instagramStats.last_synced_at && (
+                  <p className="text-xs text-gray-400 mt-2">
+                    Last synced:{" "}
+                    {new Date(instagramStats.last_synced_at).toLocaleString()}
+                  </p>
+                )}
+              </div>
+            )}
+          </div>
+
           {/* Info Box */}
           <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
             <h4 className="text-sm font-medium text-blue-800 mb-1">
@@ -524,8 +737,9 @@ export default function SettingsPage() {
             <p className="text-sm text-blue-700">
               Connecting platforms allows MediaHub to fetch analytics directly
               from platform APIs. This provides accurate stats for CHM&apos;s
-              official channels. LinkedIn uses OAuth, X uses a bearer token,
-              and YouTube uses an API key — both configured on the server.
+              official channels. LinkedIn uses OAuth; X uses a bearer token;
+              YouTube uses an API key; Facebook and Instagram use a Page Access
+              Token — all configured on the server.
             </p>
           </div>
         </div>

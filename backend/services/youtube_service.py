@@ -5,6 +5,7 @@ Read-only access - only fetches public analytics, doesn't post content.
 """
 
 import logging
+from typing import Optional
 
 import httpx
 
@@ -177,3 +178,120 @@ async def fetch_recent_videos(
             logger.warning(f"Failed to fetch recent YouTube videos: {e}")
 
     return videos
+
+
+async def fetch_all_channel_videos(
+    api_key: str, channel_id: str, max_pages: int = 10
+) -> list[dict]:
+    """Fetch all videos for a channel with engagement stats.
+
+    Paginates through search results and batch-fetches statistics.
+    Returns list of {video_id, title, description, published_at,
+    thumbnail_url, view_count, like_count, comment_count}.
+    """
+    all_videos = []
+    page_token: Optional[str] = None
+
+    async with httpx.AsyncClient(timeout=30) as client:
+        for _ in range(max_pages):
+            try:
+                params: dict = {
+                    "part": "snippet",
+                    "channelId": channel_id,
+                    "order": "date",
+                    "type": "video",
+                    "maxResults": 50,
+                    "key": api_key,
+                }
+                if page_token:
+                    params["pageToken"] = page_token
+
+                search_resp = await client.get(f"{YT_API_BASE}/search", params=params)
+                if search_resp.status_code != 200:
+                    logger.warning(f"YouTube search failed: {search_resp.status_code}")
+                    break
+
+                search_data = search_resp.json()
+                video_ids = []
+                video_snippets: dict = {}
+
+                for item in search_data.get("items", []):
+                    vid_id = item.get("id", {}).get("videoId")
+                    if vid_id:
+                        video_ids.append(vid_id)
+                        video_snippets[vid_id] = item.get("snippet", {})
+
+                if video_ids:
+                    stats = await fetch_video_stats(api_key, video_ids, client=client)
+                    for vid_id in video_ids:
+                        snippet = video_snippets.get(vid_id, {})
+                        vid_stats = stats.get(vid_id, {})
+                        all_videos.append({
+                            "video_id": vid_id,
+                            "title": snippet.get("title", ""),
+                            "description": snippet.get("description", ""),
+                            "published_at": snippet.get("publishedAt"),
+                            "thumbnail_url": snippet.get("thumbnails", {})
+                            .get("medium", {})
+                            .get("url"),
+                            "view_count": vid_stats.get("view_count", 0),
+                            "like_count": vid_stats.get("like_count", 0),
+                            "comment_count": vid_stats.get("comment_count", 0),
+                        })
+
+                page_token = search_data.get("nextPageToken")
+                if not page_token:
+                    break
+
+            except Exception as e:
+                logger.warning(f"Failed during YouTube channel video fetch: {e}")
+                break
+
+    logger.info(f"Fetched {len(all_videos)} total videos for channel {channel_id}")
+    return all_videos
+
+
+async def fetch_video_stats(
+    api_key: str,
+    video_ids: list[str],
+    client: Optional[httpx.AsyncClient] = None,
+) -> dict[str, dict]:
+    """Batch fetch statistics for known video IDs.
+
+    Up to 50 IDs per call. Returns dict of {video_id: {view_count, like_count, comment_count}}.
+    """
+    result: dict[str, dict] = {}
+
+    async def _fetch(c: httpx.AsyncClient) -> None:
+        for i in range(0, len(video_ids), 50):
+            chunk = video_ids[i : i + 50]
+            try:
+                resp = await c.get(
+                    f"{YT_API_BASE}/videos",
+                    params={
+                        "part": "statistics",
+                        "id": ",".join(chunk),
+                        "key": api_key,
+                    },
+                )
+                if resp.status_code == 200:
+                    data = resp.json()
+                    for item in data.get("items", []):
+                        stats = item.get("statistics", {})
+                        result[item["id"]] = {
+                            "view_count": int(stats.get("viewCount", 0)),
+                            "like_count": int(stats.get("likeCount", 0)),
+                            "comment_count": int(stats.get("commentCount", 0)),
+                        }
+                else:
+                    logger.warning(f"YouTube video stats batch failed: {resp.status_code}")
+            except Exception as e:
+                logger.warning(f"Failed to fetch YouTube video stats batch: {e}")
+
+    if client:
+        await _fetch(client)
+    else:
+        async with httpx.AsyncClient(timeout=30) as c:
+            await _fetch(c)
+
+    return result

@@ -13,12 +13,16 @@ from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from sqlalchemy import desc
+
 from config import get_settings
 from database import get_db
 from middleware.auth import get_current_active_user, require_roles
 from models.user import User, UserRole
+from models.post import Post
 from models.platform_connection import YouTubeChannelStats
 from services.youtube_service import fetch_channel_stats, fetch_recent_videos
+from services.channel_sync import sync_youtube_posts
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/youtube", tags=["youtube"])
@@ -205,3 +209,63 @@ async def get_recent_videos(
         channel_id=channel_id,
         videos=[VideoResponse(**v) for v in videos],
     )
+
+
+# --- Post sync/list endpoints ---
+
+
+class PostSyncResponse(BaseModel):
+    message: str
+    posts_processed: int
+
+
+class StoredPostResponse(BaseModel):
+    id: str
+    provider_post_id: str | None
+    title: str | None
+    posted_at: datetime | None
+    view_count: int
+    like_count: int
+    comment_count: int
+    stats_synced_at: datetime | None
+
+
+@router.post("/posts/sync", response_model=PostSyncResponse)
+async def trigger_youtube_post_sync(
+    current_user: Annotated[User, Depends(require_roles(UserRole.ADMIN, UserRole.SUPERADMIN))],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    """Manually trigger YouTube post discovery + stats sync (admin only)."""
+    count = await sync_youtube_posts(db)
+    return PostSyncResponse(message="YouTube posts synced", posts_processed=count)
+
+
+@router.get("/posts", response_model=list[StoredPostResponse])
+async def list_youtube_posts(
+    current_user: Annotated[User, Depends(get_current_active_user)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+    limit: int = 50,
+    offset: int = 0,
+):
+    """List stored official YouTube channel posts."""
+    query = (
+        select(Post)
+        .where(Post.platform == "youtube", Post.source == "direct")
+        .order_by(desc(Post.posted_at))
+        .limit(limit)
+        .offset(offset)
+    )
+    result = await db.execute(query)
+    return [
+        StoredPostResponse(
+            id=p.id,
+            provider_post_id=p.provider_post_id,
+            title=p.title,
+            posted_at=p.posted_at,
+            view_count=p.view_count,
+            like_count=p.like_count,
+            comment_count=p.comment_count,
+            stats_synced_at=p.stats_synced_at,
+        )
+        for p in result.scalars()
+    ]

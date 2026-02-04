@@ -16,6 +16,8 @@ from routers import (
     auth_router,
     chat_router,
     clients_router,
+    facebook_router,
+    instagram_router,
     linkedin_router,
     oauth_router,
     reports_router,
@@ -86,6 +88,8 @@ app.include_router(analytics_router)
 app.include_router(auth_router)
 app.include_router(chat_router)
 app.include_router(clients_router)
+app.include_router(facebook_router)
+app.include_router(instagram_router)
 app.include_router(linkedin_router)
 app.include_router(oauth_router)
 app.include_router(reports_router)

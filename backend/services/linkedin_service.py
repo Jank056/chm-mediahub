@@ -214,3 +214,110 @@ async def fetch_organization_stats(access_token: str, org_urn: str) -> dict:
             logger.warning(f"Failed to fetch LinkedIn page statistics: {e}")
 
     return stats
+
+
+async def fetch_organization_posts(
+    access_token: str, org_urn: str, count: int = 50
+) -> list[dict]:
+    """Fetch organization posts from LinkedIn Posts API.
+
+    Returns list of {post_urn, text, created_at}.
+    Requires r_organization_social scope.
+    """
+    headers = {
+        "Authorization": f"Bearer {access_token}",
+        "LinkedIn-Version": "202502",
+        "X-Restli-Protocol-Version": "2.0.0",
+    }
+    posts = []
+
+    async with httpx.AsyncClient(timeout=30) as client:
+        try:
+            response = await client.get(
+                "https://api.linkedin.com/rest/posts",
+                params={
+                    "author": org_urn,
+                    "q": "author",
+                    "count": min(count, 100),
+                },
+                headers=headers,
+            )
+
+            if response.status_code == 200:
+                data = response.json()
+                for element in data.get("elements", []):
+                    posts.append({
+                        "post_urn": element.get("id", ""),
+                        "text": element.get("commentary", ""),
+                        "created_at": element.get("createdAt"),
+                        "lifecycle_state": element.get("lifecycleState"),
+                    })
+                logger.info(f"Fetched {len(posts)} LinkedIn posts for {org_urn}")
+            elif response.status_code == 403:
+                logger.warning(
+                    "No permission for organization posts. "
+                    "May need r_organization_social scope. Re-authorize in Settings."
+                )
+            else:
+                logger.warning(
+                    f"Failed to fetch LinkedIn posts: {response.status_code} - {response.text}"
+                )
+        except Exception as e:
+            logger.warning(f"Failed to fetch LinkedIn organization posts: {e}")
+
+    return posts
+
+
+async def fetch_post_stats(
+    access_token: str, org_urn: str, post_urns: list[str]
+) -> dict[str, dict]:
+    """Fetch engagement stats for specific LinkedIn posts.
+
+    Returns dict of {post_urn: {click_count, like_count, comment_count, share_count, impression_count}}.
+    """
+    import asyncio
+
+    headers = {
+        "Authorization": f"Bearer {access_token}",
+        "LinkedIn-Version": "202502",
+        "X-Restli-Protocol-Version": "2.0.0",
+    }
+    result: dict[str, dict] = {}
+
+    async with httpx.AsyncClient(timeout=30) as client:
+        for post_urn in post_urns:
+            try:
+                response = await client.get(
+                    "https://api.linkedin.com/rest/organizationalEntityShareStatistics",
+                    params={
+                        "q": "organizationalEntity",
+                        "organizationalEntity": org_urn,
+                        "shares[0]": post_urn,
+                    },
+                    headers=headers,
+                )
+
+                if response.status_code == 200:
+                    data = response.json()
+                    elements = data.get("elements", [])
+                    if elements:
+                        stats = elements[0].get("totalShareStatistics", {})
+                        result[post_urn] = {
+                            "click_count": stats.get("clickCount", 0),
+                            "like_count": stats.get("likeCount", 0),
+                            "comment_count": stats.get("commentCount", 0),
+                            "share_count": stats.get("shareCount", 0),
+                            "impression_count": stats.get("impressionCount", 0),
+                        }
+                else:
+                    logger.warning(
+                        f"Failed to fetch stats for {post_urn}: {response.status_code}"
+                    )
+
+                # Rate limit: 500ms delay between calls
+                await asyncio.sleep(0.5)
+
+            except Exception as e:
+                logger.warning(f"Failed to fetch LinkedIn post stats for {post_urn}: {e}")
+
+    return result

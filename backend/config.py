@@ -66,6 +66,14 @@ class Settings(BaseSettings):
     youtube_channel_id: str = ""  # e.g. "UCCB0N8VIIexXP10t_HDabQA"
     youtube_channel_handle: str = ""  # e.g. "@CommunityHealthMedia"
 
+    # Facebook Graph API (read-only analytics for CHM's official page)
+    facebook_app_id: str = ""
+    facebook_app_secret: str = ""
+    facebook_page_id: str = ""
+
+    # Instagram (accessed via Facebook Graph API, same Meta App)
+    instagram_business_account_id: str = ""
+
     # CORS
     cors_origins: list[str] = ["http://localhost:3001", "http://127.0.0.1:3001"]
 

@@ -196,10 +196,18 @@ export interface ClipWithPosts {
   posts: PostMetrics[];
 }
 
+// Trend entry for growth charts
+export interface TrendEntry {
+  date: string;
+  value: number;
+}
+
 // Analytics API
 export const analyticsApi = {
-  getSummary: async (): Promise<AnalyticsSummary> => {
-    const response = await api.get("/analytics/summary");
+  getSummary: async (params?: {
+    source?: "official" | "branded";
+  }): Promise<AnalyticsSummary> => {
+    const response = await api.get("/analytics/summary", { params });
     return response.data;
   },
 
@@ -211,6 +219,7 @@ export const analyticsApi = {
   getPosts: async (params?: {
     platform?: string;
     shoot_id?: string;
+    source?: "official" | "branded";
     sort_by?: "views" | "likes" | "posted_at";
     limit?: number;
     offset?: number;
@@ -221,6 +230,7 @@ export const analyticsApi = {
 
   getTopPosts: async (params?: {
     platform?: string;
+    source?: "official" | "branded";
     limit?: number;
   }): Promise<PostMetrics[]> => {
     const response = await api.get("/analytics/posts/top", { params });
@@ -239,16 +249,28 @@ export const analyticsApi = {
     return response.data;
   },
 
-  getPlatforms: async (): Promise<PlatformStats[]> => {
-    const response = await api.get("/analytics/platforms");
+  getPlatforms: async (params?: {
+    source?: "official" | "branded";
+  }): Promise<PlatformStats[]> => {
+    const response = await api.get("/analytics/platforms", { params });
     return response.data;
   },
 
   getTimeline: async (params?: {
     days?: number;
     platform?: string;
+    source?: "official" | "branded";
   }): Promise<TimelineEntry[]> => {
     const response = await api.get("/analytics/timeline", { params });
+    return response.data;
+  },
+
+  getTrends: async (params: {
+    platform: string;
+    metric_name: string;
+    days?: number;
+  }): Promise<TrendEntry[]> => {
+    const response = await api.get("/analytics/trends", { params });
     return response.data;
   },
 
@@ -282,6 +304,52 @@ export const analyticsApi = {
 
   getShootTranscriptDownloadUrl: (shootId: string): string => {
     return `${API_URL}/analytics/shoots/${shootId}/transcript/download`;
+  },
+};
+
+// Facebook API
+export const facebookApi = {
+  getStats: async () => {
+    const response = await api.get("/api/facebook/stats");
+    return response.data;
+  },
+
+  syncStats: async () => {
+    const response = await api.post("/api/facebook/stats/sync");
+    return response.data;
+  },
+
+  syncPosts: async () => {
+    const response = await api.post("/api/facebook/posts/sync");
+    return response.data;
+  },
+
+  getPosts: async (params?: { limit?: number; offset?: number }) => {
+    const response = await api.get("/api/facebook/posts", { params });
+    return response.data;
+  },
+};
+
+// Instagram API
+export const instagramApi = {
+  getStats: async () => {
+    const response = await api.get("/api/instagram/stats");
+    return response.data;
+  },
+
+  syncStats: async () => {
+    const response = await api.post("/api/instagram/stats/sync");
+    return response.data;
+  },
+
+  syncPosts: async () => {
+    const response = await api.post("/api/instagram/posts/sync");
+    return response.data;
+  },
+
+  getPosts: async (params?: { limit?: number; offset?: number }) => {
+    const response = await api.get("/api/instagram/posts", { params });
+    return response.data;
   },
 };
 

@@ -11,11 +11,26 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from database import get_db
 from middleware.auth import get_current_user
 from models.clip import Clip, ClipStatus
+from models.metric_snapshot import MetricSnapshot
 from models.post import Post
 from models.shoot import Shoot
 from models.user import User
 
 router = APIRouter(prefix="/analytics", tags=["analytics"])
+
+
+def _apply_source_filter(query, source: Optional[str]):
+    """Apply source filter to a Post query.
+
+    source="official" -> direct (official channel posts)
+    source="branded" -> webhook (branded posts from ops-console)
+    source=None -> no filter (all posts)
+    """
+    if source == "official":
+        return query.where(Post.source == "direct")
+    elif source == "branded":
+        return query.where(Post.source == "webhook")
+    return query
 
 
 # ============== Response Models ==============
@@ -124,33 +139,36 @@ class ClipWithPosts(BaseModel):
 async def get_analytics_summary(
     current_user: Annotated[User, Depends(get_current_user)],
     db: Annotated[AsyncSession, Depends(get_db)],
+    source: Optional[str] = Query(None, pattern="^(official|branded)$"),
 ):
     """
     Get analytics summary with engagement metrics.
 
-    Data is automatically synced from your ops-console.
+    - source: Filter by "official" (channel posts) or "branded" (ops-console). Omit for all.
     """
     # Get total clips
     total_clips_result = await db.execute(select(func.count(Clip.id)))
     total_clips = total_clips_result.scalar() or 0
 
-    # Get total posts
-    total_posts_result = await db.execute(select(func.count(Post.id)))
+    # Get total posts (with source filter)
+    posts_count_query = select(func.count(Post.id))
+    posts_count_query = _apply_source_filter(posts_count_query, source)
+    total_posts_result = await db.execute(posts_count_query)
     total_posts = total_posts_result.scalar() or 0
 
     # Get total shoots
     total_shoots_result = await db.execute(select(func.count(Shoot.id)))
     total_shoots = total_shoots_result.scalar() or 0
 
-    # Get engagement totals from posts
-    engagement_result = await db.execute(
-        select(
-            func.coalesce(func.sum(Post.view_count), 0),
-            func.coalesce(func.sum(Post.like_count), 0),
-            func.coalesce(func.sum(Post.comment_count), 0),
-            func.coalesce(func.sum(Post.share_count), 0),
-        )
+    # Get engagement totals from posts (with source filter)
+    engagement_query = select(
+        func.coalesce(func.sum(Post.view_count), 0),
+        func.coalesce(func.sum(Post.like_count), 0),
+        func.coalesce(func.sum(Post.comment_count), 0),
+        func.coalesce(func.sum(Post.share_count), 0),
     )
+    engagement_query = _apply_source_filter(engagement_query, source)
+    engagement_result = await db.execute(engagement_query)
     row = engagement_result.one()
     total_views = int(row[0])
     total_likes = int(row[1])
@@ -169,10 +187,12 @@ async def get_analytics_summary(
     )
     clips_by_status = {row[0].value: row[1] for row in status_result}
 
-    # Get posts by platform
-    posts_platform_result = await db.execute(
-        select(Post.platform, func.count(Post.id)).group_by(Post.platform)
-    )
+    # Get posts by platform (with source filter)
+    posts_platform_query = select(
+        Post.platform, func.count(Post.id)
+    ).group_by(Post.platform)
+    posts_platform_query = _apply_source_filter(posts_platform_query, source)
+    posts_platform_result = await db.execute(posts_platform_query)
     posts_by_platform = {row[0] or "unknown": row[1] for row in posts_platform_result}
 
     # Get last sync time
@@ -200,19 +220,22 @@ async def get_posts(
     db: Annotated[AsyncSession, Depends(get_db)],
     platform: Optional[str] = None,
     shoot_id: Optional[str] = None,
-    sort_by: str = Query("views", regex="^(views|likes|posted_at)$"),
+    source: Optional[str] = Query(None, pattern="^(official|branded)$"),
+    sort_by: str = Query("views", pattern="^(views|likes|posted_at)$"),
     limit: int = Query(50, ge=1, le=500),
     offset: int = Query(0, ge=0),
 ):
     """
     Get posts with engagement metrics, optionally filtered.
 
-    - platform: Filter by platform (youtube, linkedin, x)
+    - platform: Filter by platform (youtube, linkedin, x, facebook, instagram)
     - shoot_id: Filter by shoot/podcast ID
+    - source: Filter by "official" or "branded"
     - sort_by: Sort by views, likes, or posted_at
     - limit/offset: Pagination
     """
     query = select(Post)
+    query = _apply_source_filter(query, source)
 
     if platform:
         query = query.where(Post.platform == platform)
@@ -256,12 +279,14 @@ async def get_top_posts(
     current_user: Annotated[User, Depends(get_current_user)],
     db: Annotated[AsyncSession, Depends(get_db)],
     platform: Optional[str] = None,
+    source: Optional[str] = Query(None, pattern="^(official|branded)$"),
     limit: int = Query(10, ge=1, le=100),
 ):
     """
     Get top performing posts by view count.
     """
     query = select(Post).order_by(desc(Post.view_count))
+    query = _apply_source_filter(query, source)
 
     if platform:
         query = query.where(Post.platform == platform)
@@ -293,7 +318,7 @@ async def get_top_posts(
 async def get_shoots(
     current_user: Annotated[User, Depends(get_current_user)],
     db: Annotated[AsyncSession, Depends(get_db)],
-    sort_by: str = Query("views", regex="^(views|posts|name)$"),
+    sort_by: str = Query("views", pattern="^(views|posts|name)$"),
 ):
     """
     Get all shoots with aggregated engagement stats.
@@ -469,6 +494,7 @@ async def download_shoot_transcript(
 async def get_platform_stats(
     current_user: Annotated[User, Depends(get_current_user)],
     db: Annotated[AsyncSession, Depends(get_db)],
+    source: Optional[str] = Query(None, pattern="^(official|branded)$"),
 ):
     """
     Get aggregated stats per platform.
@@ -480,7 +506,9 @@ async def get_platform_stats(
         func.coalesce(func.sum(Post.like_count), 0).label("total_likes"),
         func.coalesce(func.sum(Post.comment_count), 0).label("total_comments"),
         func.coalesce(func.sum(Post.share_count), 0).label("total_shares"),
-    ).group_by(Post.platform)
+    )
+    query = _apply_source_filter(query, source)
+    query = query.group_by(Post.platform)
 
     result = await db.execute(query)
 
@@ -503,12 +531,14 @@ async def get_timeline(
     db: Annotated[AsyncSession, Depends(get_db)],
     days: int = Query(30, ge=7, le=365),
     platform: Optional[str] = None,
+    source: Optional[str] = Query(None, pattern="^(official|branded)$"),
 ):
     """
     Get posts/views grouped by date for charting.
 
     - days: Number of days to include (default 30)
     - platform: Filter by platform
+    - source: Filter by "official" or "branded"
     """
     # Calculate date range
     end_date = datetime.utcnow().date()
@@ -528,6 +558,7 @@ async def get_timeline(
             func.date(Post.posted_at) <= end_date,
         )
     )
+    query = _apply_source_filter(query, source)
 
     if platform:
         query = query.where(Post.platform == platform)
@@ -673,7 +704,7 @@ async def search_clips(
     q: Optional[str] = Query(None, description="Search query for title, description, or tags"),
     platform: Optional[str] = None,
     status: Optional[str] = None,
-    sort_by: str = Query("views", regex="^(views|likes|recent|title|posted)$"),
+    sort_by: str = Query("views", pattern="^(views|likes|recent|title|posted)$"),
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
 ):
@@ -813,4 +844,52 @@ async def search_clips(
             ],
         )
         for item in clip_results
+    ]
+
+
+# ============== Metric Trends ==============
+
+class TrendEntry(BaseModel):
+    """Single data point in a trend series."""
+    date: str
+    value: int
+
+
+@router.get("/trends", response_model=list[TrendEntry])
+async def get_metric_trends(
+    current_user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+    platform: str = Query(..., description="Platform: youtube, x, linkedin, facebook, instagram"),
+    metric_name: str = Query(..., description="Metric: subscriber_count, follower_count, etc."),
+    days: int = Query(30, ge=7, le=365),
+):
+    """
+    Get metric snapshots over time for growth charts.
+
+    Returns one value per day (latest snapshot for that day).
+    """
+    end_date = datetime.utcnow()
+    start_date = end_date - timedelta(days=days)
+
+    query = (
+        select(
+            func.date(MetricSnapshot.recorded_at).label("date"),
+            func.max(MetricSnapshot.metric_value).label("value"),
+        )
+        .where(
+            and_(
+                MetricSnapshot.platform == platform,
+                MetricSnapshot.metric_name == metric_name,
+                MetricSnapshot.recorded_at >= start_date,
+            )
+        )
+        .group_by(func.date(MetricSnapshot.recorded_at))
+        .order_by(func.date(MetricSnapshot.recorded_at))
+    )
+
+    result = await db.execute(query)
+
+    return [
+        TrendEntry(date=row.date.isoformat(), value=int(row.value))
+        for row in result
     ]

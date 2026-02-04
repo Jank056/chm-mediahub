@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { useAuthStore } from "@/lib/auth-store";
-import { api } from "@/lib/api";
+import { api, analyticsApi, type PostMetrics } from "@/lib/api";
 
 interface LinkedInStats {
   connected: boolean;
@@ -34,11 +34,41 @@ interface YouTubeStats {
   last_synced_at: string | null;
 }
 
+interface FacebookStats {
+  connected: boolean;
+  page_id: string | null;
+  page_name: string | null;
+  follower_count: number;
+  fan_count: number;
+  last_synced_at: string | null;
+}
+
+interface InstagramStats {
+  connected: boolean;
+  ig_account_id: string | null;
+  username: string | null;
+  name: string | null;
+  follower_count: number;
+  media_count: number;
+  last_synced_at: string | null;
+}
+
+const platformIcons: Record<string, string> = {
+  youtube: "YT",
+  linkedin: "LI",
+  x: "X",
+  facebook: "FB",
+  instagram: "IG",
+};
+
 export default function DashboardPage() {
   const user = useAuthStore((state) => state.user);
   const [linkedinStats, setLinkedinStats] = useState<LinkedInStats | null>(null);
   const [xStats, setXStats] = useState<XStats | null>(null);
   const [youtubeStats, setYoutubeStats] = useState<YouTubeStats | null>(null);
+  const [facebookStats, setFacebookStats] = useState<FacebookStats | null>(null);
+  const [instagramStats, setInstagramStats] = useState<InstagramStats | null>(null);
+  const [recentPosts, setRecentPosts] = useState<PostMetrics[]>([]);
 
   useEffect(() => {
     // Fetch platform stats for admins
@@ -47,10 +77,16 @@ export default function DashboardPage() {
         api.get("/api/linkedin/stats").catch(() => null),
         api.get("/api/x/stats").catch(() => null),
         api.get("/api/youtube/stats").catch(() => null),
-      ]).then(([linkedinRes, xRes, youtubeRes]) => {
+        api.get("/api/facebook/stats").catch(() => null),
+        api.get("/api/instagram/stats").catch(() => null),
+        analyticsApi.getPosts({ source: "official", sort_by: "posted_at", limit: 5 }).catch(() => []),
+      ]).then(([linkedinRes, xRes, youtubeRes, facebookRes, instagramRes, posts]) => {
         setLinkedinStats(linkedinRes?.data || null);
         setXStats(xRes?.data || null);
         setYoutubeStats(youtubeRes?.data || null);
+        setFacebookStats(facebookRes?.data || null);
+        setInstagramStats(instagramRes?.data || null);
+        setRecentPosts(posts as PostMetrics[]);
       });
     }
   }, [user?.role]);
@@ -87,7 +123,7 @@ export default function DashboardPage() {
           <h2 className="text-lg font-semibold text-gray-900">Official CHM Channels</h2>
           <p className="text-sm text-gray-500">Account-level metrics from Community Health Media&apos;s official social profiles.</p>
         </div>
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 lg:gap-6 mb-6 lg:mb-8">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 lg:gap-6 mb-6 lg:mb-8">
           {/* LinkedIn Stats Widget */}
           <div className="bg-white p-4 lg:p-6 rounded-lg shadow">
             <div className="flex items-center justify-between mb-4">
@@ -207,7 +243,116 @@ export default function DashboardPage() {
               <p className="text-sm text-gray-400">Pending API configuration</p>
             )}
           </div>
+
+          {/* Facebook Stats Widget */}
+          <div className="bg-white p-4 lg:p-6 rounded-lg shadow">
+            <div className="flex items-center justify-between mb-4">
+              <span className="text-lg font-semibold text-gray-900 flex items-center gap-2">
+                <svg className="w-5 h-5 text-[#1877F2]" fill="currentColor" viewBox="0 0 24 24">
+                  <path d="M24 12.073c0-6.627-5.373-12-12-12s-12 5.373-12 12c0 5.99 4.388 10.954 10.125 11.854v-8.385H7.078v-3.47h3.047V9.43c0-3.007 1.792-4.669 4.533-4.669 1.312 0 2.686.235 2.686.235v2.953H15.83c-1.491 0-1.956.925-1.956 1.874v2.25h3.328l-.532 3.47h-2.796v8.385C19.612 23.027 24 18.062 24 12.073z"/>
+                </svg>
+                Facebook
+              </span>
+              {facebookStats?.connected && facebookStats.last_synced_at && (
+                <span className="text-xs text-gray-400">
+                  Updated {new Date(facebookStats.last_synced_at).toLocaleDateString()}
+                </span>
+              )}
+            </div>
+            {facebookStats?.connected ? (
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <p className="text-sm text-gray-500">Followers</p>
+                  <p className="text-2xl font-bold text-gray-900">
+                    {facebookStats.follower_count.toLocaleString()}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-sm text-gray-500">Page Likes</p>
+                  <p className="text-2xl font-bold text-gray-900">
+                    {facebookStats.fan_count.toLocaleString()}
+                  </p>
+                </div>
+              </div>
+            ) : (
+              <p className="text-sm text-gray-400">Pending Meta App configuration</p>
+            )}
+          </div>
+
+          {/* Instagram Stats Widget */}
+          <div className="bg-white p-4 lg:p-6 rounded-lg shadow">
+            <div className="flex items-center justify-between mb-4">
+              <span className="text-lg font-semibold text-gray-900 flex items-center gap-2">
+                <svg className="w-5 h-5 text-[#E4405F]" fill="currentColor" viewBox="0 0 24 24">
+                  <path d="M12 0C8.74 0 8.333.015 7.053.072 5.775.132 4.905.333 4.14.63c-.789.306-1.459.717-2.126 1.384S.935 3.35.63 4.14C.333 4.905.131 5.775.072 7.053.012 8.333 0 8.74 0 12s.015 3.667.072 4.947c.06 1.277.261 2.148.558 2.913.306.788.717 1.459 1.384 2.126.667.666 1.336 1.079 2.126 1.384.766.296 1.636.499 2.913.558C8.333 23.988 8.74 24 12 24s3.667-.015 4.947-.072c1.277-.06 2.148-.262 2.913-.558.788-.306 1.459-.718 2.126-1.384.666-.667 1.079-1.335 1.384-2.126.296-.765.499-1.636.558-2.913.06-1.28.072-1.687.072-4.947s-.015-3.667-.072-4.947c-.06-1.277-.262-2.149-.558-2.913-.306-.789-.718-1.459-1.384-2.126C21.319 1.347 20.651.935 19.86.63c-.765-.297-1.636-.499-2.913-.558C15.667.012 15.26 0 12 0zm0 2.16c3.203 0 3.585.016 4.85.071 1.17.055 1.805.249 2.227.415.562.217.96.477 1.382.896.419.42.679.819.896 1.381.164.422.36 1.057.413 2.227.057 1.266.07 1.646.07 4.85s-.015 3.585-.074 4.85c-.061 1.17-.256 1.805-.421 2.227-.224.562-.479.96-.899 1.382-.419.419-.824.679-1.38.896-.42.164-1.065.36-2.235.413-1.274.057-1.649.07-4.859.07-3.211 0-3.586-.015-4.859-.074-1.171-.061-1.816-.256-2.236-.421-.569-.224-.96-.479-1.379-.899-.421-.419-.69-.824-.9-1.38-.165-.42-.359-1.065-.42-2.235-.045-1.26-.061-1.649-.061-4.844 0-3.196.016-3.586.061-4.861.061-1.17.255-1.814.42-2.234.21-.57.479-.96.9-1.381.419-.419.81-.689 1.379-.898.42-.166 1.051-.361 2.221-.421 1.275-.045 1.65-.06 4.859-.06l.045.03zm0 3.678a6.162 6.162 0 100 12.324 6.162 6.162 0 100-12.324zM12 16c-2.21 0-4-1.79-4-4s1.79-4 4-4 4 1.79 4 4-1.79 4-4 4zm7.846-10.405a1.441 1.441 0 11-2.88 0 1.441 1.441 0 012.88 0z"/>
+                </svg>
+                Instagram
+              </span>
+              {instagramStats?.connected && instagramStats.last_synced_at && (
+                <span className="text-xs text-gray-400">
+                  Updated {new Date(instagramStats.last_synced_at).toLocaleDateString()}
+                </span>
+              )}
+            </div>
+            {instagramStats?.connected ? (
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <p className="text-sm text-gray-500">Followers</p>
+                  <p className="text-2xl font-bold text-gray-900">
+                    {instagramStats.follower_count.toLocaleString()}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-sm text-gray-500">Posts</p>
+                  <p className="text-2xl font-bold text-gray-900">
+                    {instagramStats.media_count.toLocaleString()}
+                  </p>
+                </div>
+              </div>
+            ) : (
+              <p className="text-sm text-gray-400">Pending Meta App configuration</p>
+            )}
+          </div>
         </div>
+
+        {/* Recent Official Content */}
+        {recentPosts.length > 0 && (
+          <div className="mb-6 lg:mb-8">
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="text-base font-semibold text-gray-900">Recent Content</h3>
+              <a href="/dashboard/analytics" className="text-sm text-blue-600 hover:text-blue-800">
+                View all analytics &rarr;
+              </a>
+            </div>
+            <div className="bg-white rounded-lg shadow divide-y divide-gray-100">
+              {recentPosts.map((post) => (
+                <div key={post.id} className="flex items-center gap-3 px-4 py-3">
+                  <span className="flex-shrink-0 w-8 h-8 rounded-full bg-gray-100 flex items-center justify-center text-xs font-bold text-gray-600 uppercase">
+                    {platformIcons[post.platform] || post.platform.slice(0, 2).toUpperCase()}
+                  </span>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-medium text-gray-900 truncate">
+                      {post.title || (post.platform === "x" ? "Tweet" : "Post")}
+                    </p>
+                    <p className="text-xs text-gray-500">
+                      {post.posted_at
+                        ? new Date(post.posted_at).toLocaleDateString()
+                        : "No date"}
+                    </p>
+                  </div>
+                  <div className="flex-shrink-0 text-right">
+                    <p className="text-sm font-semibold text-gray-900">
+                      {post.view_count.toLocaleString()} views
+                    </p>
+                    <p className="text-xs text-gray-500">
+                      {post.like_count.toLocaleString()} likes
+                    </p>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
         </>
       )}
 
