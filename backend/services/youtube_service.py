@@ -180,49 +180,105 @@ async def fetch_recent_videos(
     return videos
 
 
+async def _get_uploads_playlist_id(
+    api_key: str, channel_id: str, client: httpx.AsyncClient
+) -> Optional[str]:
+    """Get the uploads playlist ID for a channel.
+
+    Every YouTube channel has a hidden 'uploads' playlist that contains
+    all uploaded videos. This is more reliable than the Search API.
+    """
+    try:
+        resp = await client.get(
+            f"{YT_API_BASE}/channels",
+            params={
+                "part": "contentDetails",
+                "id": channel_id,
+                "key": api_key,
+            },
+        )
+        if resp.status_code == 200:
+            items = resp.json().get("items", [])
+            if items:
+                return (
+                    items[0]
+                    .get("contentDetails", {})
+                    .get("relatedPlaylists", {})
+                    .get("uploads")
+                )
+        logger.warning(f"Failed to get uploads playlist: {resp.status_code}")
+    except Exception as e:
+        logger.warning(f"Failed to get uploads playlist ID: {e}")
+    return None
+
+
 async def fetch_all_channel_videos(
-    api_key: str, channel_id: str, max_pages: int = 10
+    api_key: str, channel_id: str, max_pages: int = 20
 ) -> list[dict]:
     """Fetch all videos for a channel with engagement stats.
 
-    Paginates through search results and batch-fetches statistics.
+    Uses the PlaylistItems API with the channel's uploads playlist,
+    which reliably returns every video (unlike the Search API).
+    Then batch-fetches statistics and rich metadata for each video.
+
     Returns list of {video_id, title, description, published_at,
-    thumbnail_url, view_count, like_count, comment_count}.
+    thumbnail_url, view_count, like_count, comment_count, ...metadata}.
     """
     all_videos = []
     page_token: Optional[str] = None
 
     async with httpx.AsyncClient(timeout=30) as client:
-        for _ in range(max_pages):
+        # Step 1: Get the uploads playlist ID
+        uploads_playlist_id = await _get_uploads_playlist_id(
+            api_key, channel_id, client
+        )
+        if not uploads_playlist_id:
+            logger.error(
+                f"Could not find uploads playlist for channel {channel_id}"
+            )
+            return all_videos
+
+        logger.info(
+            f"Using uploads playlist {uploads_playlist_id} for channel {channel_id}"
+        )
+
+        # Step 2: Paginate through all playlist items
+        for page_num in range(max_pages):
             try:
                 params: dict = {
                     "part": "snippet",
-                    "channelId": channel_id,
-                    "order": "date",
-                    "type": "video",
+                    "playlistId": uploads_playlist_id,
                     "maxResults": 50,
                     "key": api_key,
                 }
                 if page_token:
                     params["pageToken"] = page_token
 
-                search_resp = await client.get(f"{YT_API_BASE}/search", params=params)
-                if search_resp.status_code != 200:
-                    logger.warning(f"YouTube search failed: {search_resp.status_code}")
+                resp = await client.get(
+                    f"{YT_API_BASE}/playlistItems", params=params
+                )
+                if resp.status_code != 200:
+                    logger.warning(
+                        f"YouTube playlistItems failed: {resp.status_code} - {resp.text}"
+                    )
                     break
 
-                search_data = search_resp.json()
+                data = resp.json()
                 video_ids = []
                 video_snippets: dict = {}
 
-                for item in search_data.get("items", []):
-                    vid_id = item.get("id", {}).get("videoId")
+                for item in data.get("items", []):
+                    snippet = item.get("snippet", {})
+                    vid_id = snippet.get("resourceId", {}).get("videoId")
                     if vid_id:
                         video_ids.append(vid_id)
-                        video_snippets[vid_id] = item.get("snippet", {})
+                        video_snippets[vid_id] = snippet
 
+                # Step 3: Batch fetch stats + rich metadata
                 if video_ids:
-                    stats = await fetch_video_stats(api_key, video_ids, client=client)
+                    stats = await fetch_video_stats(
+                        api_key, video_ids, client=client
+                    )
                     for vid_id in video_ids:
                         snippet = video_snippets.get(vid_id, {})
                         vid_stats = stats.get(vid_id, {})
@@ -245,7 +301,7 @@ async def fetch_all_channel_videos(
                         ]:
                             if key in vid_stats:
                                 video_data[key] = vid_stats[key]
-                        # Fallback thumbnail from search snippet if not in stats
+                        # Fallback thumbnail from playlist snippet
                         if not video_data.get("thumbnail_url"):
                             video_data["thumbnail_url"] = (
                                 snippet.get("thumbnails", {})
@@ -254,7 +310,12 @@ async def fetch_all_channel_videos(
                             )
                         all_videos.append(video_data)
 
-                page_token = search_data.get("nextPageToken")
+                logger.info(
+                    f"PlaylistItems page {page_num + 1}: "
+                    f"got {len(video_ids)} videos (total: {len(all_videos)})"
+                )
+
+                page_token = data.get("nextPageToken")
                 if not page_token:
                     break
 

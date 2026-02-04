@@ -309,7 +309,8 @@ async def fetch_post_stats(
 ) -> dict[str, dict]:
     """Fetch engagement stats for specific LinkedIn posts.
 
-    Returns dict of {post_urn: {click_count, like_count, comment_count, share_count, impression_count}}.
+    Returns dict of {post_urn: {click_count, like_count, comment_count, share_count,
+    impression_count, engagement, unique_impressions_count}}.
     """
     import asyncio
 
@@ -344,6 +345,8 @@ async def fetch_post_stats(
                             "comment_count": stats.get("commentCount", 0),
                             "share_count": stats.get("shareCount", 0),
                             "impression_count": stats.get("impressionCount", 0),
+                            "engagement": stats.get("engagement", 0.0),
+                            "unique_impressions_count": stats.get("uniqueImpressionsCount", 0),
                         }
                 else:
                     logger.warning(

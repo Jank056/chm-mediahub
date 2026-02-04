@@ -243,7 +243,7 @@ async def sync_x_posts(db: Optional[AsyncSession] = None) -> int:
                 platform_metadata={
                     k: tweet.get(k) for k in [
                         "conversation_id", "source", "bookmark_count",
-                        "context_labels", "urls",
+                        "context_labels", "urls", "video_view_count",
                     ] if tweet.get(k)
                 } or None,
             )
@@ -300,6 +300,7 @@ async def sync_linkedin_posts(db: Optional[AsyncSession] = None) -> int:
                 title=None,
                 description=post.get("text"),
                 posted_at=_parse_epoch_ms(post.get("created_at")),
+                view_count=stats.get("click_count", 0),
                 like_count=stats.get("like_count", 0),
                 comment_count=stats.get("comment_count", 0),
                 share_count=stats.get("share_count", 0),
@@ -310,9 +311,13 @@ async def sync_linkedin_posts(db: Optional[AsyncSession] = None) -> int:
                 content_type=post.get("content_type"),
                 hashtags=post.get("hashtags") or None,
                 platform_metadata={
-                    k: post.get(k) for k in [
-                        "lifecycle_state", "visibility",
-                    ] if post.get(k) is not None
+                    k: v for k, v in {
+                        "lifecycle_state": post.get("lifecycle_state"),
+                        "visibility": post.get("visibility"),
+                        "click_count": stats.get("click_count"),
+                        "engagement": stats.get("engagement"),
+                        "unique_impressions_count": stats.get("unique_impressions_count"),
+                    }.items() if v is not None and v != 0
                 } or None,
             )
 
@@ -630,7 +635,7 @@ async def backfill_all_channels() -> dict[str, int]:
                         platform_metadata={
                             k: tweet.get(k) for k in [
                                 "conversation_id", "source", "bookmark_count",
-                                "context_labels", "urls",
+                                "context_labels", "urls", "video_view_count",
                             ] if tweet.get(k)
                         } or None,
                     )

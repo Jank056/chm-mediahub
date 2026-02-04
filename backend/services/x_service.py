@@ -97,13 +97,27 @@ def _parse_tweet_data(tweet: dict, media_map: dict) -> dict:
     for key in media_keys:
         media = media_map.get(key)
         if media:
-            media_items.append({
+            item = {
                 "type": media.get("type"),  # photo, video, animated_gif
                 "url": media.get("url") or media.get("preview_image_url"),
                 "width": media.get("width"),
                 "height": media.get("height"),
                 "duration_ms": media.get("duration_ms"),
-            })
+                "alt_text": media.get("alt_text"),
+            }
+            # Video view count from media public_metrics
+            media_metrics = media.get("public_metrics", {})
+            if media_metrics.get("view_count"):
+                item["view_count"] = media_metrics["view_count"]
+            # Best quality video variant URL
+            variants = media.get("variants", [])
+            if variants:
+                # Pick highest bitrate mp4 variant
+                mp4s = [v for v in variants if v.get("content_type") == "video/mp4"]
+                if mp4s:
+                    best = max(mp4s, key=lambda v: v.get("bit_rate", 0))
+                    item["video_url"] = best.get("url")
+            media_items.append(item)
 
     # Determine content type from media
     content_type = "text"
@@ -124,7 +138,7 @@ def _parse_tweet_data(tweet: dict, media_map: dict) -> dict:
         if entity.get("name"):
             context_labels.append(entity["name"])
 
-    # Get thumbnail from first media
+    # Get thumbnail from first media (prefer preview_image for videos)
     thumbnail_url = None
     if media_items:
         thumbnail_url = media_items[0].get("url")
@@ -134,6 +148,13 @@ def _parse_tweet_data(tweet: dict, media_map: dict) -> dict:
     for m in media_items:
         if m.get("duration_ms"):
             duration_seconds = m["duration_ms"] // 1000
+            break
+
+    # Video view count from media public_metrics
+    video_view_count = None
+    for m in media_items:
+        if m.get("view_count"):
+            video_view_count = m["view_count"]
             break
 
     return {
@@ -158,6 +179,7 @@ def _parse_tweet_data(tweet: dict, media_map: dict) -> dict:
         "thumbnail_url": thumbnail_url,
         "duration_seconds": duration_seconds,
         "context_labels": context_labels[:10],  # Cap at 10
+        "video_view_count": video_view_count,
     }
 
 
@@ -179,7 +201,7 @@ async def fetch_recent_tweets(
                 params={
                     "tweet.fields": "public_metrics,created_at,entities,lang,conversation_id,source,context_annotations,attachments",
                     "expansions": "attachments.media_keys",
-                    "media.fields": "type,url,preview_image_url,width,height,duration_ms",
+                    "media.fields": "type,url,preview_image_url,width,height,duration_ms,public_metrics,variants,alt_text",
                     "max_results": min(max_results, 100),
                     "exclude": "retweets,replies",
                 },
@@ -228,7 +250,7 @@ async def fetch_user_tweets(
             params: dict = {
                 "tweet.fields": "public_metrics,created_at,entities,lang,conversation_id,source,context_annotations,attachments",
                 "expansions": "attachments.media_keys",
-                "media.fields": "type,url,preview_image_url,width,height,duration_ms",
+                "media.fields": "type,url,preview_image_url,width,height,duration_ms,public_metrics,variants,alt_text",
                 "max_results": min(max_results, 100),
                 "exclude": "retweets,replies",
             }

@@ -35,6 +35,7 @@ export default function AnalyticsPage() {
   const [selectedPlatform, setSelectedPlatform] = useState<string | null>(null);
   const [dateRange, setDateRange] = useState(30);
   const [sourceFilter, setSourceFilter] = useState<"official" | "branded" | null>(null);
+  const [contentTypeFilter, setContentTypeFilter] = useState<string | null>(null);
 
   useEffect(() => {
     const fetchData = async () => {
@@ -46,7 +47,7 @@ export default function AnalyticsPage() {
           await Promise.all([
             analyticsApi.getSummary({ source: sourceParam }),
             analyticsApi.getTopPosts({ limit: 10, platform: selectedPlatform || undefined, source: sourceParam }),
-            analyticsApi.getPosts({ source: sourceParam, platform: selectedPlatform || undefined, sort_by: "views", limit: 100 }),
+            analyticsApi.getPosts({ source: sourceParam, platform: selectedPlatform || undefined, sort_by: "views", limit: 500 }),
             analyticsApi.getShoots({ sort_by: "views" }),
             analyticsApi.getPlatforms({ source: sourceParam }),
             analyticsApi.getTimeline({ days: dateRange, platform: selectedPlatform || undefined, source: sourceParam }),
@@ -254,6 +255,8 @@ export default function AnalyticsPage() {
           title={sourceFilter === "official" ? "Official Channel Posts" : sourceFilter === "branded" ? "Branded Account Posts" : "All Posts"}
           showSource={!sourceFilter}
           pageSize={15}
+          contentTypeFilter={contentTypeFilter}
+          onContentTypeFilterChange={setContentTypeFilter}
         />
       )}
 
