@@ -111,6 +111,14 @@ export const usersApi = {
 };
 
 // Analytics Types
+export interface MediaItem {
+  type?: string;
+  url?: string;
+  width?: number;
+  height?: number;
+  duration_ms?: number;
+}
+
 export interface PostMetrics {
   id: string;
   clip_id: string | null;
@@ -125,6 +133,17 @@ export interface PostMetrics {
   share_count: number;
   impression_count: number;
   stats_synced_at: string | null;
+  // Rich metadata
+  thumbnail_url: string | null;
+  content_url: string | null;
+  content_type: string | null;
+  duration_seconds: number | null;
+  is_short: boolean | null;
+  language: string | null;
+  hashtags: string[] | null;
+  mentions: string[] | null;
+  media_urls: MediaItem[] | null;
+  platform_metadata: Record<string, unknown> | null;
 }
 
 export interface ShootMetrics {

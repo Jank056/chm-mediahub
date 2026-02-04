@@ -77,13 +77,97 @@ async def fetch_account_stats(bearer_token: str, handle: str) -> dict:
     return stats
 
 
+def _parse_tweet_data(tweet: dict, media_map: dict) -> dict:
+    """Parse a tweet object into a rich data dict."""
+    metrics = tweet.get("public_metrics", {})
+    entities = tweet.get("entities", {})
+
+    # Extract hashtags
+    hashtags = [h.get("tag") for h in entities.get("hashtags", []) if h.get("tag")]
+
+    # Extract mentions
+    mentions = [f"@{m.get('username')}" for m in entities.get("mentions", []) if m.get("username")]
+
+    # Extract URLs (expanded)
+    urls = [u.get("expanded_url") for u in entities.get("urls", []) if u.get("expanded_url")]
+
+    # Extract media from expansions
+    media_keys = tweet.get("attachments", {}).get("media_keys", [])
+    media_items = []
+    for key in media_keys:
+        media = media_map.get(key)
+        if media:
+            media_items.append({
+                "type": media.get("type"),  # photo, video, animated_gif
+                "url": media.get("url") or media.get("preview_image_url"),
+                "width": media.get("width"),
+                "height": media.get("height"),
+                "duration_ms": media.get("duration_ms"),
+            })
+
+    # Determine content type from media
+    content_type = "text"
+    if media_items:
+        first_type = media_items[0].get("type", "")
+        if first_type == "video":
+            content_type = "video"
+        elif first_type == "photo":
+            content_type = "image"
+        elif first_type == "animated_gif":
+            content_type = "gif"
+
+    # Extract context annotations (ML topic labels)
+    context_labels = []
+    for ctx in tweet.get("context_annotations", []):
+        domain = ctx.get("domain", {})
+        entity = ctx.get("entity", {})
+        if entity.get("name"):
+            context_labels.append(entity["name"])
+
+    # Get thumbnail from first media
+    thumbnail_url = None
+    if media_items:
+        thumbnail_url = media_items[0].get("url")
+
+    # Duration from video media
+    duration_seconds = None
+    for m in media_items:
+        if m.get("duration_ms"):
+            duration_seconds = m["duration_ms"] // 1000
+            break
+
+    return {
+        "id": tweet["id"],
+        "text": tweet.get("text", ""),
+        "created_at": tweet.get("created_at"),
+        "lang": tweet.get("lang"),
+        "conversation_id": tweet.get("conversation_id"),
+        "source": tweet.get("source"),
+        "like_count": metrics.get("like_count", 0),
+        "retweet_count": metrics.get("retweet_count", 0),
+        "reply_count": metrics.get("reply_count", 0),
+        "quote_count": metrics.get("quote_count", 0),
+        "impression_count": metrics.get("impression_count", 0),
+        "bookmark_count": metrics.get("bookmark_count", 0),
+        # Rich metadata
+        "hashtags": hashtags,
+        "mentions": mentions,
+        "urls": urls,
+        "media": media_items,
+        "content_type": content_type,
+        "thumbnail_url": thumbnail_url,
+        "duration_seconds": duration_seconds,
+        "context_labels": context_labels[:10],  # Cap at 10
+    }
+
+
 async def fetch_recent_tweets(
     bearer_token: str, user_id: str, max_results: int = 10
 ) -> list[dict]:
-    """Fetch recent tweets for a user.
+    """Fetch recent tweets for a user with rich metadata.
 
     Uses app-only bearer token auth (free tier).
-    Returns list of tweets with public engagement metrics.
+    Returns list of tweets with engagement metrics, entities, and media.
     """
     headers = {"Authorization": f"Bearer {bearer_token}"}
     tweets = []
@@ -93,7 +177,9 @@ async def fetch_recent_tweets(
             response = await client.get(
                 f"{X_API_BASE}/users/{user_id}/tweets",
                 params={
-                    "tweet.fields": "public_metrics,created_at",
+                    "tweet.fields": "public_metrics,created_at,entities,lang,conversation_id,source,context_annotations,attachments",
+                    "expansions": "attachments.media_keys",
+                    "media.fields": "type,url,preview_image_url,width,height,duration_ms",
                     "max_results": min(max_results, 100),
                     "exclude": "retweets,replies",
                 },
@@ -102,19 +188,13 @@ async def fetch_recent_tweets(
 
             if response.status_code == 200:
                 data = response.json()
+                # Build media lookup from includes
+                media_map: dict = {}
+                for media in data.get("includes", {}).get("media", []):
+                    media_map[media["media_key"]] = media
+
                 for tweet in data.get("data", []):
-                    metrics = tweet.get("public_metrics", {})
-                    tweets.append({
-                        "id": tweet["id"],
-                        "text": tweet.get("text", ""),
-                        "created_at": tweet.get("created_at"),
-                        "like_count": metrics.get("like_count", 0),
-                        "retweet_count": metrics.get("retweet_count", 0),
-                        "reply_count": metrics.get("reply_count", 0),
-                        "quote_count": metrics.get("quote_count", 0),
-                        "impression_count": metrics.get("impression_count", 0),
-                        "bookmark_count": metrics.get("bookmark_count", 0),
-                    })
+                    tweets.append(_parse_tweet_data(tweet, media_map))
                 logger.info(f"Fetched {len(tweets)} recent tweets for user {user_id}")
             elif response.status_code == 429:
                 logger.warning("X API rate limit exceeded for tweets")
@@ -134,7 +214,7 @@ async def fetch_user_tweets(
     max_results: int = 100,
     pagination_token: Optional[str] = None,
 ) -> tuple[list[dict], Optional[str]]:
-    """Fetch tweets for a user with pagination support.
+    """Fetch tweets for a user with pagination support and rich metadata.
 
     Returns (tweets, next_pagination_token). Token is None when no more pages.
     Up to 3200 total tweets accessible per user timeline.
@@ -146,7 +226,9 @@ async def fetch_user_tweets(
     async with httpx.AsyncClient(timeout=20) as client:
         try:
             params: dict = {
-                "tweet.fields": "public_metrics,created_at",
+                "tweet.fields": "public_metrics,created_at,entities,lang,conversation_id,source,context_annotations,attachments",
+                "expansions": "attachments.media_keys",
+                "media.fields": "type,url,preview_image_url,width,height,duration_ms",
                 "max_results": min(max_results, 100),
                 "exclude": "retweets,replies",
             }
@@ -161,19 +243,13 @@ async def fetch_user_tweets(
 
             if response.status_code == 200:
                 data = response.json()
+                # Build media lookup from includes
+                media_map: dict = {}
+                for media in data.get("includes", {}).get("media", []):
+                    media_map[media["media_key"]] = media
+
                 for tweet in data.get("data", []):
-                    metrics = tweet.get("public_metrics", {})
-                    tweets.append({
-                        "id": tweet["id"],
-                        "text": tweet.get("text", ""),
-                        "created_at": tweet.get("created_at"),
-                        "like_count": metrics.get("like_count", 0),
-                        "retweet_count": metrics.get("retweet_count", 0),
-                        "reply_count": metrics.get("reply_count", 0),
-                        "quote_count": metrics.get("quote_count", 0),
-                        "impression_count": metrics.get("impression_count", 0),
-                        "bookmark_count": metrics.get("bookmark_count", 0),
-                    })
+                    tweets.append(_parse_tweet_data(tweet, media_map))
                 next_token = data.get("meta", {}).get("next_token")
                 logger.info(
                     f"Fetched {len(tweets)} tweets for user {user_id} "

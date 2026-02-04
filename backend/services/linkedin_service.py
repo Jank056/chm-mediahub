@@ -246,11 +246,47 @@ async def fetch_organization_posts(
             if response.status_code == 200:
                 data = response.json()
                 for element in data.get("elements", []):
+                    # Extract content object for post type and media
+                    content = element.get("content", {})
+                    content_type = "text"
+                    media_url = None
+                    thumbnail_url = None
+
+                    if content:
+                        if "article" in content:
+                            content_type = "article"
+                            article = content["article"]
+                            media_url = article.get("source")
+                            thumbnail_url = article.get("thumbnail")
+                        elif "media" in content:
+                            media_obj = content["media"]
+                            media_id = media_obj.get("id", "")
+                            if "video" in media_id.lower() or "ugcVideo" in media_id:
+                                content_type = "video"
+                            elif "image" in media_id.lower():
+                                content_type = "image"
+                            else:
+                                content_type = "media"
+                        elif "multiImage" in content:
+                            content_type = "carousel"
+                        elif "poll" in content:
+                            content_type = "poll"
+
+                    # Extract hashtags from commentary
+                    import re
+                    commentary = element.get("commentary", "")
+                    hashtags = re.findall(r"#(\w+)", commentary) if commentary else []
+
                     posts.append({
                         "post_urn": element.get("id", ""),
-                        "text": element.get("commentary", ""),
+                        "text": commentary,
                         "created_at": element.get("createdAt"),
                         "lifecycle_state": element.get("lifecycleState"),
+                        "content_type": content_type,
+                        "media_url": media_url,
+                        "thumbnail_url": thumbnail_url,
+                        "visibility": element.get("visibility"),
+                        "hashtags": hashtags,
                     })
                 logger.info(f"Fetched {len(posts)} LinkedIn posts for {org_urn}")
             elif response.status_code == 403:

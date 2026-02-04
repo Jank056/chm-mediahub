@@ -226,18 +226,33 @@ async def fetch_all_channel_videos(
                     for vid_id in video_ids:
                         snippet = video_snippets.get(vid_id, {})
                         vid_stats = stats.get(vid_id, {})
-                        all_videos.append({
+                        video_data = {
                             "video_id": vid_id,
                             "title": snippet.get("title", ""),
                             "description": snippet.get("description", ""),
                             "published_at": snippet.get("publishedAt"),
-                            "thumbnail_url": snippet.get("thumbnails", {})
-                            .get("medium", {})
-                            .get("url"),
                             "view_count": vid_stats.get("view_count", 0),
                             "like_count": vid_stats.get("like_count", 0),
                             "comment_count": vid_stats.get("comment_count", 0),
-                        })
+                        }
+                        # Merge rich metadata from fetch_video_stats
+                        for key in [
+                            "thumbnail_url", "duration_seconds", "is_short",
+                            "definition", "has_captions", "tags",
+                            "category_id", "default_language", "privacy_status",
+                            "license", "embeddable", "made_for_kids",
+                            "topic_categories",
+                        ]:
+                            if key in vid_stats:
+                                video_data[key] = vid_stats[key]
+                        # Fallback thumbnail from search snippet if not in stats
+                        if not video_data.get("thumbnail_url"):
+                            video_data["thumbnail_url"] = (
+                                snippet.get("thumbnails", {})
+                                .get("medium", {})
+                                .get("url")
+                            )
+                        all_videos.append(video_data)
 
                 page_token = search_data.get("nextPageToken")
                 if not page_token:
@@ -251,14 +266,30 @@ async def fetch_all_channel_videos(
     return all_videos
 
 
+def _parse_duration(iso_duration: str) -> Optional[int]:
+    """Parse ISO 8601 duration (PT1H2M3S) to seconds."""
+    if not iso_duration:
+        return None
+    import re
+    match = re.match(r"PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?", iso_duration)
+    if not match:
+        return None
+    hours = int(match.group(1) or 0)
+    minutes = int(match.group(2) or 0)
+    seconds = int(match.group(3) or 0)
+    return hours * 3600 + minutes * 60 + seconds
+
+
 async def fetch_video_stats(
     api_key: str,
     video_ids: list[str],
     client: Optional[httpx.AsyncClient] = None,
 ) -> dict[str, dict]:
-    """Batch fetch statistics for known video IDs.
+    """Batch fetch statistics and metadata for known video IDs.
 
-    Up to 50 IDs per call. Returns dict of {video_id: {view_count, like_count, comment_count}}.
+    Up to 50 IDs per call. Fetches statistics, contentDetails, status, and topicDetails
+    at no extra quota cost (same API call).
+    Returns dict of {video_id: {view_count, like_count, comment_count, ...metadata}}.
     """
     result: dict[str, dict] = {}
 
@@ -269,7 +300,7 @@ async def fetch_video_stats(
                 resp = await c.get(
                     f"{YT_API_BASE}/videos",
                     params={
-                        "part": "statistics",
+                        "part": "statistics,contentDetails,status,topicDetails,snippet",
                         "id": ",".join(chunk),
                         "key": api_key,
                     },
@@ -278,10 +309,42 @@ async def fetch_video_stats(
                     data = resp.json()
                     for item in data.get("items", []):
                         stats = item.get("statistics", {})
+                        content = item.get("contentDetails", {})
+                        status = item.get("status", {})
+                        topics = item.get("topicDetails", {})
+                        snippet = item.get("snippet", {})
+
+                        duration_sec = _parse_duration(content.get("duration", ""))
+
+                        # Get best available thumbnail
+                        thumbnails = snippet.get("thumbnails", {})
+                        thumb_url = (
+                            thumbnails.get("maxres", {}).get("url")
+                            or thumbnails.get("high", {}).get("url")
+                            or thumbnails.get("medium", {}).get("url")
+                        )
+
+                        # Extract tags from snippet
+                        tags = snippet.get("tags", [])
+
                         result[item["id"]] = {
                             "view_count": int(stats.get("viewCount", 0)),
                             "like_count": int(stats.get("likeCount", 0)),
                             "comment_count": int(stats.get("commentCount", 0)),
+                            # Rich metadata
+                            "duration_seconds": duration_sec,
+                            "is_short": duration_sec is not None and duration_sec <= 60,
+                            "definition": content.get("definition"),  # hd or sd
+                            "has_captions": content.get("caption") == "true",
+                            "thumbnail_url": thumb_url,
+                            "tags": tags[:30] if tags else [],
+                            "category_id": snippet.get("categoryId"),
+                            "default_language": snippet.get("defaultLanguage") or snippet.get("defaultAudioLanguage"),
+                            "privacy_status": status.get("privacyStatus"),
+                            "license": status.get("license"),
+                            "embeddable": status.get("embeddable"),
+                            "made_for_kids": status.get("madeForKids"),
+                            "topic_categories": topics.get("topicCategories", []),
                         }
                 else:
                     logger.warning(f"YouTube video stats batch failed: {resp.status_code}")

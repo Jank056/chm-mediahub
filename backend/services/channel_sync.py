@@ -60,8 +60,19 @@ async def _upsert_post(
     comment_count: int = 0,
     share_count: int = 0,
     impression_count: int = 0,
+    # Rich metadata
+    thumbnail_url: Optional[str] = None,
+    content_url: Optional[str] = None,
+    content_type: Optional[str] = None,
+    duration_seconds: Optional[int] = None,
+    is_short: Optional[bool] = None,
+    language: Optional[str] = None,
+    hashtags: Optional[list] = None,
+    mentions: Optional[list] = None,
+    media_urls: Optional[list] = None,
+    platform_metadata: Optional[dict] = None,
 ) -> None:
-    """Upsert a post with source='direct'. Updates stats if post exists."""
+    """Upsert a post with source='direct'. Updates stats and metadata if post exists."""
     result = await db.execute(
         select(Post).where(
             Post.platform == platform,
@@ -79,6 +90,27 @@ async def _upsert_post(
         existing.share_count = share_count
         existing.impression_count = impression_count
         existing.stats_synced_at = now
+        # Update metadata on every sync (values may change)
+        if thumbnail_url is not None:
+            existing.thumbnail_url = thumbnail_url
+        if content_url is not None:
+            existing.content_url = content_url
+        if content_type is not None:
+            existing.content_type = content_type
+        if duration_seconds is not None:
+            existing.duration_seconds = duration_seconds
+        if is_short is not None:
+            existing.is_short = is_short
+        if language is not None:
+            existing.language = language
+        if hashtags is not None:
+            existing.hashtags = hashtags
+        if mentions is not None:
+            existing.mentions = mentions
+        if media_urls is not None:
+            existing.media_urls = media_urls
+        if platform_metadata is not None:
+            existing.platform_metadata = platform_metadata
     else:
         post = Post(
             id=str(uuid4()),
@@ -94,6 +126,16 @@ async def _upsert_post(
             share_count=share_count,
             impression_count=impression_count,
             stats_synced_at=now,
+            thumbnail_url=thumbnail_url,
+            content_url=content_url,
+            content_type=content_type,
+            duration_seconds=duration_seconds,
+            is_short=is_short,
+            language=language,
+            hashtags=hashtags,
+            mentions=mentions,
+            media_urls=media_urls,
+            platform_metadata=platform_metadata,
         )
         db.add(post)
 
@@ -125,6 +167,21 @@ async def sync_youtube_posts(db: Optional[AsyncSession] = None) -> int:
                 view_count=video.get("view_count", 0),
                 like_count=video.get("like_count", 0),
                 comment_count=video.get("comment_count", 0),
+                # Rich metadata
+                thumbnail_url=video.get("thumbnail_url"),
+                content_url=f"https://www.youtube.com/watch?v={video['video_id']}",
+                content_type="video",
+                duration_seconds=video.get("duration_seconds"),
+                is_short=video.get("is_short"),
+                language=video.get("default_language"),
+                hashtags=video.get("tags"),
+                platform_metadata={
+                    k: video.get(k) for k in [
+                        "definition", "has_captions", "category_id",
+                        "privacy_status", "license", "embeddable",
+                        "made_for_kids", "topic_categories",
+                    ] if video.get(k) is not None
+                } or None,
             )
 
         await session.commit()
@@ -160,6 +217,9 @@ async def sync_x_posts(db: Optional[AsyncSession] = None) -> int:
         tweets, _ = await fetch_user_tweets(settings.x_bearer_token, user_id, max_results=100)
 
         for tweet in tweets:
+            # Build content URL
+            content_url = f"https://x.com/{settings.x_account_handle}/status/{tweet['id']}"
+
             await _upsert_post(
                 session,
                 platform="x",
@@ -171,6 +231,21 @@ async def sync_x_posts(db: Optional[AsyncSession] = None) -> int:
                 comment_count=tweet.get("reply_count", 0),
                 share_count=tweet.get("retweet_count", 0) + tweet.get("quote_count", 0),
                 impression_count=tweet.get("impression_count", 0),
+                # Rich metadata
+                thumbnail_url=tweet.get("thumbnail_url"),
+                content_url=content_url,
+                content_type=tweet.get("content_type"),
+                duration_seconds=tweet.get("duration_seconds"),
+                language=tweet.get("lang"),
+                hashtags=tweet.get("hashtags") or None,
+                mentions=tweet.get("mentions") or None,
+                media_urls=tweet.get("media") or None,
+                platform_metadata={
+                    k: tweet.get(k) for k in [
+                        "conversation_id", "source", "bookmark_count",
+                        "context_labels", "urls",
+                    ] if tweet.get(k)
+                } or None,
             )
 
         await session.commit()
@@ -229,6 +304,16 @@ async def sync_linkedin_posts(db: Optional[AsyncSession] = None) -> int:
                 comment_count=stats.get("comment_count", 0),
                 share_count=stats.get("share_count", 0),
                 impression_count=stats.get("impression_count", 0),
+                # Rich metadata
+                thumbnail_url=post.get("thumbnail_url"),
+                content_url=post.get("media_url"),
+                content_type=post.get("content_type"),
+                hashtags=post.get("hashtags") or None,
+                platform_metadata={
+                    k: post.get(k) for k in [
+                        "lifecycle_state", "visibility",
+                    ] if post.get(k) is not None
+                } or None,
             )
 
         await session.commit()
@@ -485,6 +570,20 @@ async def backfill_all_channels() -> dict[str, int]:
                     view_count=video.get("view_count", 0),
                     like_count=video.get("like_count", 0),
                     comment_count=video.get("comment_count", 0),
+                    thumbnail_url=video.get("thumbnail_url"),
+                    content_url=f"https://www.youtube.com/watch?v={video['video_id']}",
+                    content_type="video",
+                    duration_seconds=video.get("duration_seconds"),
+                    is_short=video.get("is_short"),
+                    language=video.get("default_language"),
+                    hashtags=video.get("tags"),
+                    platform_metadata={
+                        k: video.get(k) for k in [
+                            "definition", "has_captions", "category_id",
+                            "privacy_status", "license", "embeddable",
+                            "made_for_kids", "topic_categories",
+                        ] if video.get(k) is not None
+                    } or None,
                 )
             await session.commit()
             results["youtube"] = len(videos)
@@ -508,6 +607,7 @@ async def backfill_all_channels() -> dict[str, int]:
                         break
 
                 for tweet in all_tweets:
+                    content_url = f"https://x.com/{settings.x_account_handle}/status/{tweet['id']}"
                     await _upsert_post(
                         session,
                         platform="x",
@@ -519,6 +619,20 @@ async def backfill_all_channels() -> dict[str, int]:
                         comment_count=tweet.get("reply_count", 0),
                         share_count=tweet.get("retweet_count", 0) + tweet.get("quote_count", 0),
                         impression_count=tweet.get("impression_count", 0),
+                        thumbnail_url=tweet.get("thumbnail_url"),
+                        content_url=content_url,
+                        content_type=tweet.get("content_type"),
+                        duration_seconds=tweet.get("duration_seconds"),
+                        language=tweet.get("lang"),
+                        hashtags=tweet.get("hashtags") or None,
+                        mentions=tweet.get("mentions") or None,
+                        media_urls=tweet.get("media") or None,
+                        platform_metadata={
+                            k: tweet.get(k) for k in [
+                                "conversation_id", "source", "bookmark_count",
+                                "context_labels", "urls",
+                            ] if tweet.get(k)
+                        } or None,
                     )
                 await session.commit()
                 results["x"] = len(all_tweets)

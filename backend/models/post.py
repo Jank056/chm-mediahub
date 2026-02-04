@@ -8,7 +8,8 @@ Posts come from two sources:
 from datetime import datetime
 from typing import Optional
 
-from sqlalchemy import DateTime, ForeignKey, Integer, String, Text, UniqueConstraint, func
+from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint, func
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from database import Base
@@ -42,6 +43,18 @@ class Post(Base):
     title: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
     description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     posted_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    # Rich metadata (platform-specific, all nullable)
+    thumbnail_url: Mapped[Optional[str]] = mapped_column(String(1000), nullable=True)
+    content_url: Mapped[Optional[str]] = mapped_column(String(1000), nullable=True)
+    content_type: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)  # video, image, article, poll, carousel, text
+    duration_seconds: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    is_short: Mapped[Optional[bool]] = mapped_column(Boolean, nullable=True)  # YouTube Shorts, etc.
+    language: Mapped[Optional[str]] = mapped_column(String(10), nullable=True)
+    hashtags: Mapped[Optional[list]] = mapped_column(JSONB, nullable=True)  # ["tag1", "tag2"]
+    mentions: Mapped[Optional[list]] = mapped_column(JSONB, nullable=True)  # ["@user1", "@user2"]
+    media_urls: Mapped[Optional[list]] = mapped_column(JSONB, nullable=True)  # [{url, type, width, height}]
+    platform_metadata: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)  # Platform-specific extras
 
     # Source: "webhook" (from ops-console) or "direct" (fetched by MediaHub)
     source: Mapped[str] = mapped_column(String(20), default="webhook")

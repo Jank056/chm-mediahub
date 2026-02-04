@@ -4,6 +4,7 @@ from datetime import datetime, timedelta
 from typing import Annotated, Optional
 
 from fastapi import APIRouter, Depends, Query
+from typing import Any
 from pydantic import BaseModel
 from sqlalchemy import func, select, and_, desc
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -50,6 +51,17 @@ class PostMetrics(BaseModel):
     share_count: int
     impression_count: int
     stats_synced_at: Optional[datetime]
+    # Rich metadata
+    thumbnail_url: Optional[str] = None
+    content_url: Optional[str] = None
+    content_type: Optional[str] = None
+    duration_seconds: Optional[int] = None
+    is_short: Optional[bool] = None
+    language: Optional[str] = None
+    hashtags: Optional[list[str]] = None
+    mentions: Optional[list[str]] = None
+    media_urls: Optional[list[dict[str, Any]]] = None
+    platform_metadata: Optional[dict[str, Any]] = None
 
 
 class ShootMetrics(BaseModel):
