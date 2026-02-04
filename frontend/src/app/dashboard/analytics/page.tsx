@@ -23,6 +23,7 @@ import {
 export default function AnalyticsPage() {
   const [summary, setSummary] = useState<AnalyticsSummary | null>(null);
   const [topPosts, setTopPosts] = useState<PostMetrics[]>([]);
+  const [allPosts, setAllPosts] = useState<PostMetrics[]>([]);
   const [shoots, setShoots] = useState<ShootMetrics[]>([]);
   const [platforms, setPlatforms] = useState<PlatformStats[]>([]);
   const [timeline, setTimeline] = useState<TimelineEntry[]>([]);
@@ -41,10 +42,11 @@ export default function AnalyticsPage() {
       try {
         const sourceParam = sourceFilter || undefined;
         // Fetch all data in parallel
-        const [summaryData, postsData, shootsData, platformsData, timelineData] =
+        const [summaryData, postsData, allPostsData, shootsData, platformsData, timelineData] =
           await Promise.all([
             analyticsApi.getSummary({ source: sourceParam }),
             analyticsApi.getTopPosts({ limit: 10, platform: selectedPlatform || undefined, source: sourceParam }),
+            analyticsApi.getPosts({ source: sourceParam, platform: selectedPlatform || undefined, sort_by: "views", limit: 100 }),
             analyticsApi.getShoots({ sort_by: "views" }),
             analyticsApi.getPlatforms({ source: sourceParam }),
             analyticsApi.getTimeline({ days: dateRange, platform: selectedPlatform || undefined, source: sourceParam }),
@@ -52,11 +54,12 @@ export default function AnalyticsPage() {
 
         setSummary(summaryData);
         setTopPosts(postsData);
+        setAllPosts(allPostsData);
         setShoots(shootsData);
         setPlatforms(platformsData);
         setTimeline(timelineData);
 
-        // Fetch follower/subscriber growth trends (fire-and-forget style)
+        // Fetch follower/subscriber growth trends
         const trendConfigs = [
           { platform: "youtube", metric: "subscriber_count", label: "YouTube Subscribers", color: "#FF0000" },
           { platform: "x", metric: "follower_count", label: "X Followers", color: "#000000" },
@@ -101,6 +104,12 @@ export default function AnalyticsPage() {
     return date.toLocaleDateString();
   };
 
+  const formatNumber = (num: number) => {
+    if (num >= 1_000_000) return `${(num / 1_000_000).toFixed(1)}M`;
+    if (num >= 1_000) return `${(num / 1_000).toFixed(1)}K`;
+    return num.toLocaleString();
+  };
+
   if (isLoading) {
     return (
       <div className="flex items-center justify-center h-64">
@@ -111,11 +120,25 @@ export default function AnalyticsPage() {
 
   const availablePlatforms = platforms.map((p) => p.platform);
 
+  // Compute per-platform summary cards when viewing "All Content"
+  const platformSummary = platforms.length > 0
+    ? platforms.sort((a, b) => b.total_views - a.total_views)
+    : [];
+
   return (
     <div className="space-y-6">
       {/* Header */}
       <div className="flex justify-between items-center">
-        <h1 className="text-2xl font-bold text-gray-900">Analytics</h1>
+        <div>
+          <h1 className="text-2xl font-bold text-gray-900">Analytics</h1>
+          <p className="text-sm text-gray-500 mt-0.5">
+            {sourceFilter === "official"
+              ? "Official CHM channel content"
+              : sourceFilter === "branded"
+              ? "Branded account content (ops-console)"
+              : "All content across official and branded channels"}
+          </p>
+        </div>
         {summary?.last_updated && (
           <span className="text-sm text-gray-500">
             Last synced: {formatLastUpdated(summary.last_updated)}
@@ -131,34 +154,36 @@ export default function AnalyticsPage() {
       )}
 
       {/* Source Toggle */}
-      <div className="flex gap-1 bg-gray-100 rounded-lg p-1 w-fit">
-        {([
-          { value: null, label: "All Content" },
-          { value: "official" as const, label: "Official Channels" },
-          { value: "branded" as const, label: "Branded Accounts" },
-        ]).map((opt) => (
-          <button
-            key={opt.label}
-            onClick={() => setSourceFilter(opt.value)}
-            className={`px-4 py-1.5 text-sm font-medium rounded-md transition-colors ${
-              sourceFilter === opt.value
-                ? "bg-white text-gray-900 shadow-sm"
-                : "text-gray-500 hover:text-gray-700"
-            }`}
-          >
-            {opt.label}
-          </button>
-        ))}
-      </div>
+      <div className="flex flex-wrap items-center gap-4">
+        <div className="flex gap-1 bg-gray-100 rounded-lg p-1">
+          {([
+            { value: null, label: "All Content" },
+            { value: "official" as const, label: "Official Channels" },
+            { value: "branded" as const, label: "Branded Accounts" },
+          ]).map((opt) => (
+            <button
+              key={opt.label}
+              onClick={() => setSourceFilter(opt.value)}
+              className={`px-4 py-1.5 text-sm font-medium rounded-md transition-colors ${
+                sourceFilter === opt.value
+                  ? "bg-white text-gray-900 shadow-sm"
+                  : "text-gray-500 hover:text-gray-700"
+              }`}
+            >
+              {opt.label}
+            </button>
+          ))}
+        </div>
 
-      {/* Filter Bar */}
-      <FilterBar
-        platforms={availablePlatforms}
-        selectedPlatform={selectedPlatform}
-        onPlatformChange={setSelectedPlatform}
-        dateRange={dateRange}
-        onDateRangeChange={setDateRange}
-      />
+        {/* Filter Bar */}
+        <FilterBar
+          platforms={availablePlatforms}
+          selectedPlatform={selectedPlatform}
+          onPlatformChange={setSelectedPlatform}
+          dateRange={dateRange}
+          onDateRangeChange={setDateRange}
+        />
+      </div>
 
       {/* Summary Stats */}
       {summary && (
@@ -170,16 +195,44 @@ export default function AnalyticsPage() {
           />
           <StatCard
             title="Total Views"
-            value={summary.total_views}
+            value={formatNumber(summary.total_views)}
           />
           <StatCard
             title="Total Likes"
-            value={summary.total_likes}
+            value={formatNumber(summary.total_likes)}
           />
           <StatCard
             title="Total Comments"
-            value={summary.total_comments}
+            value={formatNumber(summary.total_comments)}
           />
+        </div>
+      )}
+
+      {/* Per-platform breakdown pills */}
+      {platformSummary.length > 0 && (
+        <div className="flex flex-wrap gap-3">
+          {platformSummary.map((p) => {
+            const colors: Record<string, string> = {
+              youtube: "border-red-200 bg-red-50",
+              x: "border-gray-300 bg-gray-50",
+              linkedin: "border-blue-200 bg-blue-50",
+              facebook: "border-blue-200 bg-blue-50",
+              instagram: "border-pink-200 bg-pink-50",
+            };
+            return (
+              <div
+                key={p.platform}
+                className={`flex items-center gap-3 px-4 py-2.5 rounded-lg border ${
+                  colors[p.platform.toLowerCase()] || "border-gray-200 bg-gray-50"
+                }`}
+              >
+                <span className="text-sm font-semibold text-gray-900 capitalize">{p.platform}</span>
+                <span className="text-xs text-gray-500">{p.post_count} posts</span>
+                <span className="text-xs font-medium text-gray-700">{formatNumber(p.total_views)} views</span>
+                <span className="text-xs text-gray-500">{formatNumber(p.total_likes)} likes</span>
+              </div>
+            );
+          })}
         </div>
       )}
 
@@ -194,13 +247,20 @@ export default function AnalyticsPage() {
         <TrendsChart series={followerTrends} title="Follower Growth" />
       )}
 
-      {/* Top Posts Table */}
-      {topPosts.length > 0 && (
-        <PostsTable posts={topPosts} title="Top Performing Posts" />
+      {/* All Posts Table */}
+      {allPosts.length > 0 && (
+        <PostsTable
+          posts={allPosts}
+          title={sourceFilter === "official" ? "Official Channel Posts" : sourceFilter === "branded" ? "Branded Account Posts" : "All Posts"}
+          showSource={!sourceFilter}
+          pageSize={15}
+        />
       )}
 
-      {/* Shoots Grid */}
-      {shoots.length > 0 && <ShootsGrid shoots={shoots} />}
+      {/* Shoots Grid - only for branded content */}
+      {!sourceFilter || sourceFilter === "branded" ? (
+        shoots.length > 0 && <ShootsGrid shoots={shoots} />
+      ) : null}
 
       {/* Empty State */}
       {!summary?.total_posts && !isLoading && (
@@ -209,8 +269,9 @@ export default function AnalyticsPage() {
             No Analytics Data Yet
           </h3>
           <p className="text-gray-500">
-            Posts will appear here once synced from your ops-console.
-            Engagement metrics (views, likes, comments) will be tracked automatically.
+            {sourceFilter === "official"
+              ? "Official channel posts will appear once platform sync completes. Check Settings to verify API connections."
+              : "Posts will appear here once synced from your ops-console."}
           </p>
         </div>
       )}

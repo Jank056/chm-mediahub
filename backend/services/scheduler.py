@@ -208,28 +208,28 @@ def start_scheduler():
         print("✓ Scheduler already running")
         return
 
-    # Add LinkedIn sync job - every 6 hours
+    # Add LinkedIn sync job - every 12 hours
     scheduler.add_job(
         sync_linkedin_stats,
-        trigger=IntervalTrigger(hours=6),
+        trigger=IntervalTrigger(hours=12),
         id="linkedin_stats_sync",
         name="Sync LinkedIn organization stats",
         replace_existing=True,
     )
 
-    # Add X sync job - every 6 hours
+    # Add X sync job - every 12 hours
     scheduler.add_job(
         sync_x_stats,
-        trigger=IntervalTrigger(hours=6),
+        trigger=IntervalTrigger(hours=12),
         id="x_stats_sync",
         name="Sync X account stats",
         replace_existing=True,
     )
 
-    # Add YouTube sync job - every 6 hours
+    # Add YouTube sync job - every 12 hours
     scheduler.add_job(
         sync_youtube_stats,
-        trigger=IntervalTrigger(hours=6),
+        trigger=IntervalTrigger(hours=12),
         id="youtube_stats_sync",
         name="Sync YouTube channel stats",
         replace_existing=True,
@@ -237,16 +237,16 @@ def start_scheduler():
 
     # --- Post discovery jobs ---
 
-    # YouTube posts - every 6 hours (alongside stats sync)
+    # YouTube posts - every 12 hours
     scheduler.add_job(
         _sync_youtube_posts,
-        trigger=IntervalTrigger(hours=6),
+        trigger=IntervalTrigger(hours=12),
         id="youtube_posts_sync",
         name="Sync YouTube channel posts",
         replace_existing=True,
     )
 
-    # X posts - every 12 hours (conserve pay-per-use budget)
+    # X posts - every 12 hours
     scheduler.add_job(
         _sync_x_posts,
         trigger=IntervalTrigger(hours=12),
@@ -255,44 +255,44 @@ def start_scheduler():
         replace_existing=True,
     )
 
-    # LinkedIn posts - every 6 hours
+    # LinkedIn posts - every 12 hours
     scheduler.add_job(
         _sync_linkedin_posts,
-        trigger=IntervalTrigger(hours=6),
+        trigger=IntervalTrigger(hours=12),
         id="linkedin_posts_sync",
         name="Sync LinkedIn organization posts",
         replace_existing=True,
     )
 
-    # Facebook posts - every 6 hours (silently skips if not configured)
+    # Facebook posts - every 12 hours (silently skips if not configured)
     scheduler.add_job(
         _sync_facebook_posts,
-        trigger=IntervalTrigger(hours=6),
+        trigger=IntervalTrigger(hours=12),
         id="facebook_posts_sync",
         name="Sync Facebook page posts",
         replace_existing=True,
     )
 
-    # Instagram posts - every 6 hours (silently skips if not configured)
+    # Instagram posts - every 12 hours (silently skips if not configured)
     scheduler.add_job(
         _sync_instagram_posts,
-        trigger=IntervalTrigger(hours=6),
+        trigger=IntervalTrigger(hours=12),
         id="instagram_posts_sync",
         name="Sync Instagram account posts",
         replace_existing=True,
     )
 
-    # Metric snapshots - every 6 hours
+    # Metric snapshots - every 12 hours
     scheduler.add_job(
         _record_metric_snapshots,
-        trigger=IntervalTrigger(hours=6),
+        trigger=IntervalTrigger(hours=12),
         id="metric_snapshots",
         name="Record account-level metric snapshots",
         replace_existing=True,
     )
 
     scheduler.start()
-    print("✓ Background scheduler started (stats + post sync every 6-12 hours)")
+    print("✓ Background scheduler started (stats + post sync every 12 hours)")
 
 
 def stop_scheduler():

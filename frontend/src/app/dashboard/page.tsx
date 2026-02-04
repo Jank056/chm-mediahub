@@ -53,12 +53,42 @@ interface InstagramStats {
   last_synced_at: string | null;
 }
 
-const platformIcons: Record<string, string> = {
+const PLATFORM_COLORS: Record<string, { bg: string; text: string; icon: string }> = {
+  youtube: { bg: "bg-red-100", text: "text-red-700", icon: "text-red-500" },
+  linkedin: { bg: "bg-blue-100", text: "text-blue-700", icon: "text-blue-600" },
+  x: { bg: "bg-gray-100", text: "text-gray-800", icon: "text-gray-800" },
+  facebook: { bg: "bg-blue-100", text: "text-blue-700", icon: "text-blue-600" },
+  instagram: { bg: "bg-pink-100", text: "text-pink-700", icon: "text-pink-500" },
+};
+
+const PLATFORM_ICONS: Record<string, string> = {
   youtube: "YT",
   linkedin: "LI",
   x: "X",
   facebook: "FB",
   instagram: "IG",
+};
+
+const formatNumber = (num: number) => {
+  if (num >= 1_000_000) return `${(num / 1_000_000).toFixed(1)}M`;
+  if (num >= 1_000) return `${(num / 1_000).toFixed(1)}K`;
+  return num.toLocaleString();
+};
+
+const formatRelativeTime = (dateStr: string | null) => {
+  if (!dateStr) return "";
+  const date = new Date(dateStr);
+  const now = new Date();
+  const diffMs = now.getTime() - date.getTime();
+  const diffMins = Math.floor(diffMs / 60000);
+  const diffHours = Math.floor(diffMins / 60);
+  const diffDays = Math.floor(diffHours / 24);
+
+  if (diffMins < 1) return "just now";
+  if (diffMins < 60) return `${diffMins}m ago`;
+  if (diffHours < 24) return `${diffHours}h ago`;
+  if (diffDays < 7) return `${diffDays}d ago`;
+  return date.toLocaleDateString("en-US", { month: "short", day: "numeric" });
 };
 
 export default function DashboardPage() {
@@ -69,6 +99,7 @@ export default function DashboardPage() {
   const [facebookStats, setFacebookStats] = useState<FacebookStats | null>(null);
   const [instagramStats, setInstagramStats] = useState<InstagramStats | null>(null);
   const [recentPosts, setRecentPosts] = useState<PostMetrics[]>([]);
+  const [topPosts, setTopPosts] = useState<PostMetrics[]>([]);
 
   useEffect(() => {
     // Fetch platform stats for admins
@@ -79,17 +110,30 @@ export default function DashboardPage() {
         api.get("/api/youtube/stats").catch(() => null),
         api.get("/api/facebook/stats").catch(() => null),
         api.get("/api/instagram/stats").catch(() => null),
-        analyticsApi.getPosts({ source: "official", sort_by: "posted_at", limit: 5 }).catch(() => []),
-      ]).then(([linkedinRes, xRes, youtubeRes, facebookRes, instagramRes, posts]) => {
+        analyticsApi.getPosts({ source: "official", sort_by: "posted_at", limit: 10 }).catch(() => []),
+        analyticsApi.getTopPosts({ source: "official", limit: 5 }).catch(() => []),
+      ]).then(([linkedinRes, xRes, youtubeRes, facebookRes, instagramRes, posts, top]) => {
         setLinkedinStats(linkedinRes?.data || null);
         setXStats(xRes?.data || null);
         setYoutubeStats(youtubeRes?.data || null);
         setFacebookStats(facebookRes?.data || null);
         setInstagramStats(instagramRes?.data || null);
         setRecentPosts(posts as PostMetrics[]);
+        setTopPosts(top as PostMetrics[]);
       });
     }
   }, [user?.role]);
+
+  // Compute totals across connected platforms
+  const totalFollowers =
+    (youtubeStats?.connected ? youtubeStats.subscriber_count : 0) +
+    (xStats?.connected ? xStats.follower_count : 0) +
+    (linkedinStats?.connected ? linkedinStats.follower_count : 0) +
+    (facebookStats?.connected ? facebookStats.follower_count : 0) +
+    (instagramStats?.connected ? instagramStats.follower_count : 0);
+
+  const connectedCount = [youtubeStats, xStats, linkedinStats, facebookStats, instagramStats]
+    .filter((s) => s?.connected).length;
 
   return (
     <div>
@@ -111,8 +155,13 @@ export default function DashboardPage() {
         </div>
 
         <div className="bg-white p-4 lg:p-6 rounded-lg shadow sm:col-span-2 lg:col-span-1">
-          <h3 className="text-sm font-medium text-gray-500">Account Status</h3>
-          <p className="mt-2 text-base lg:text-xl font-semibold text-green-600">Active</p>
+          <h3 className="text-sm font-medium text-gray-500">Total Audience</h3>
+          <p className="mt-2 text-base lg:text-xl font-semibold text-gray-900">
+            {totalFollowers > 0 ? formatNumber(totalFollowers) : "—"}
+          </p>
+          <p className="text-xs text-gray-400 mt-0.5">
+            {connectedCount > 0 ? `across ${connectedCount} platform${connectedCount > 1 ? "s" : ""}` : "No platforms connected"}
+          </p>
         </div>
       </div>
 
@@ -136,7 +185,7 @@ export default function DashboardPage() {
               </a>
               {linkedinStats?.connected && linkedinStats.last_synced_at && (
                 <span className="text-xs text-gray-400">
-                  Updated {new Date(linkedinStats.last_synced_at).toLocaleDateString()}
+                  {formatRelativeTime(linkedinStats.last_synced_at)}
                 </span>
               )}
             </div>
@@ -172,7 +221,7 @@ export default function DashboardPage() {
               </a>
               {xStats?.connected && xStats.last_synced_at && (
                 <span className="text-xs text-gray-400">
-                  Updated {new Date(xStats.last_synced_at).toLocaleDateString()}
+                  {formatRelativeTime(xStats.last_synced_at)}
                 </span>
               )}
             </div>
@@ -214,7 +263,7 @@ export default function DashboardPage() {
               </a>
               {youtubeStats?.connected && youtubeStats.last_synced_at && (
                 <span className="text-xs text-gray-400">
-                  Updated {new Date(youtubeStats.last_synced_at).toLocaleDateString()}
+                  {formatRelativeTime(youtubeStats.last_synced_at)}
                 </span>
               )}
             </div>
@@ -229,7 +278,7 @@ export default function DashboardPage() {
                 <div>
                   <p className="text-sm text-gray-500">Views</p>
                   <p className="text-2xl font-bold text-gray-900">
-                    {youtubeStats.view_count.toLocaleString()}
+                    {formatNumber(youtubeStats.view_count)}
                   </p>
                 </div>
                 <div>
@@ -255,7 +304,7 @@ export default function DashboardPage() {
               </span>
               {facebookStats?.connected && facebookStats.last_synced_at && (
                 <span className="text-xs text-gray-400">
-                  Updated {new Date(facebookStats.last_synced_at).toLocaleDateString()}
+                  {formatRelativeTime(facebookStats.last_synced_at)}
                 </span>
               )}
             </div>
@@ -290,7 +339,7 @@ export default function DashboardPage() {
               </span>
               {instagramStats?.connected && instagramStats.last_synced_at && (
                 <span className="text-xs text-gray-400">
-                  Updated {new Date(instagramStats.last_synced_at).toLocaleDateString()}
+                  {formatRelativeTime(instagramStats.last_synced_at)}
                 </span>
               )}
             </div>
@@ -315,44 +364,106 @@ export default function DashboardPage() {
           </div>
         </div>
 
-        {/* Recent Official Content */}
-        {recentPosts.length > 0 && (
-          <div className="mb-6 lg:mb-8">
+        {/* Content sections side by side */}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6 lg:mb-8">
+          {/* Recent Official Content */}
+          <div>
             <div className="flex items-center justify-between mb-3">
               <h3 className="text-base font-semibold text-gray-900">Recent Content</h3>
-              <a href="/dashboard/analytics" className="text-sm text-blue-600 hover:text-blue-800">
-                View all analytics &rarr;
+              <a href="/dashboard/analytics?source=official" className="text-sm text-blue-600 hover:text-blue-800">
+                View all &rarr;
               </a>
             </div>
             <div className="bg-white rounded-lg shadow divide-y divide-gray-100">
-              {recentPosts.map((post) => (
-                <div key={post.id} className="flex items-center gap-3 px-4 py-3">
-                  <span className="flex-shrink-0 w-8 h-8 rounded-full bg-gray-100 flex items-center justify-center text-xs font-bold text-gray-600 uppercase">
-                    {platformIcons[post.platform] || post.platform.slice(0, 2).toUpperCase()}
-                  </span>
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm font-medium text-gray-900 truncate">
-                      {post.title || (post.platform === "x" ? "Tweet" : "Post")}
-                    </p>
-                    <p className="text-xs text-gray-500">
-                      {post.posted_at
-                        ? new Date(post.posted_at).toLocaleDateString()
-                        : "No date"}
-                    </p>
-                  </div>
-                  <div className="flex-shrink-0 text-right">
-                    <p className="text-sm font-semibold text-gray-900">
-                      {post.view_count.toLocaleString()} views
-                    </p>
-                    <p className="text-xs text-gray-500">
-                      {post.like_count.toLocaleString()} likes
-                    </p>
-                  </div>
+              {recentPosts.length > 0 ? (
+                recentPosts.map((post) => {
+                  const colors = PLATFORM_COLORS[post.platform] || { bg: "bg-gray-100", text: "text-gray-700", icon: "text-gray-500" };
+                  return (
+                    <div key={post.id} className="flex items-center gap-3 px-4 py-3 hover:bg-gray-50 transition-colors">
+                      <span className={`flex-shrink-0 w-9 h-9 rounded-full ${colors.bg} flex items-center justify-center text-xs font-bold ${colors.text}`}>
+                        {PLATFORM_ICONS[post.platform] || post.platform.slice(0, 2).toUpperCase()}
+                      </span>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-medium text-gray-900 truncate">
+                          {post.title || (post.platform === "x" ? "Tweet" : "Post")}
+                        </p>
+                        <p className="text-xs text-gray-500">
+                          {post.posted_at ? formatRelativeTime(post.posted_at) : "No date"}
+                        </p>
+                      </div>
+                      <div className="flex-shrink-0 text-right space-y-0.5">
+                        <p className="text-sm font-semibold text-gray-900">
+                          {formatNumber(post.view_count)} <span className="text-xs font-normal text-gray-400">views</span>
+                        </p>
+                        <div className="flex items-center justify-end gap-2 text-xs text-gray-500">
+                          <span>{formatNumber(post.like_count)} likes</span>
+                          <span>{formatNumber(post.comment_count)} comments</span>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })
+              ) : (
+                <div className="px-4 py-8 text-center text-sm text-gray-400">
+                  No official channel posts yet. Sync platforms in Settings.
                 </div>
-              ))}
+              )}
             </div>
           </div>
-        )}
+
+          {/* Top Performing Official Posts */}
+          <div>
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="text-base font-semibold text-gray-900">Top Performing</h3>
+              <a href="/dashboard/analytics?source=official" className="text-sm text-blue-600 hover:text-blue-800">
+                Full analytics &rarr;
+              </a>
+            </div>
+            <div className="bg-white rounded-lg shadow divide-y divide-gray-100">
+              {topPosts.length > 0 ? (
+                topPosts.map((post, idx) => {
+                  const colors = PLATFORM_COLORS[post.platform] || { bg: "bg-gray-100", text: "text-gray-700", icon: "text-gray-500" };
+                  const engRate = post.view_count > 0
+                    ? ((post.like_count + post.comment_count + post.share_count) / post.view_count * 100)
+                    : 0;
+                  return (
+                    <div key={post.id} className="flex items-center gap-3 px-4 py-3 hover:bg-gray-50 transition-colors">
+                      <span className="flex-shrink-0 w-6 text-sm font-bold text-gray-300 text-right">
+                        {idx + 1}
+                      </span>
+                      <span className={`flex-shrink-0 w-9 h-9 rounded-full ${colors.bg} flex items-center justify-center text-xs font-bold ${colors.text}`}>
+                        {PLATFORM_ICONS[post.platform] || post.platform.slice(0, 2).toUpperCase()}
+                      </span>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-medium text-gray-900 truncate">
+                          {post.title || (post.platform === "x" ? "Tweet" : "Post")}
+                        </p>
+                        <div className="flex items-center gap-2 mt-0.5">
+                          <span className="text-xs text-gray-500">{formatNumber(post.view_count)} views</span>
+                          <span className={`text-xs font-medium ${
+                            engRate >= 5 ? "text-green-600" : engRate >= 2 ? "text-yellow-600" : "text-gray-400"
+                          }`}>
+                            {engRate.toFixed(1)}% eng.
+                          </span>
+                        </div>
+                      </div>
+                      <div className="flex-shrink-0 text-right">
+                        <p className="text-sm font-semibold text-gray-900">
+                          {formatNumber(post.like_count)}
+                        </p>
+                        <p className="text-xs text-gray-400">likes</p>
+                      </div>
+                    </div>
+                  );
+                })
+              ) : (
+                <div className="px-4 py-8 text-center text-sm text-gray-400">
+                  Top posts will appear after sync.
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
         </>
       )}
 
