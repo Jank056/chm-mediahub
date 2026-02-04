@@ -38,6 +38,8 @@ def _apply_source_filter(query, source: Optional[str]):
 
 class PostMetrics(BaseModel):
     """Metrics for a single platform post."""
+    model_config = {"from_attributes": True}
+
     id: str
     clip_id: Optional[str]
     shoot_id: Optional[str]
@@ -267,21 +269,7 @@ async def get_posts(
     result = await db.execute(query)
 
     return [
-        PostMetrics(
-            id=post.id,
-            clip_id=post.clip_id,
-            shoot_id=post.shoot_id,
-            platform=post.platform,
-            provider_post_id=post.provider_post_id,
-            title=post.title,
-            posted_at=post.posted_at,
-            view_count=post.view_count,
-            like_count=post.like_count,
-            comment_count=post.comment_count,
-            share_count=post.share_count,
-            impression_count=post.impression_count,
-            stats_synced_at=post.stats_synced_at,
-        )
+        PostMetrics.model_validate(post)
         for post in result.scalars()
     ]
 
@@ -307,21 +295,7 @@ async def get_top_posts(
     result = await db.execute(query)
 
     return [
-        PostMetrics(
-            id=post.id,
-            clip_id=post.clip_id,
-            shoot_id=post.shoot_id,
-            platform=post.platform,
-            provider_post_id=post.provider_post_id,
-            title=post.title,
-            posted_at=post.posted_at,
-            view_count=post.view_count,
-            like_count=post.like_count,
-            comment_count=post.comment_count,
-            share_count=post.share_count,
-            impression_count=post.impression_count,
-            stats_synced_at=post.stats_synced_at,
-        )
+        PostMetrics.model_validate(post)
         for post in result.scalars()
     ]
 
