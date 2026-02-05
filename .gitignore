@@ -37,5 +37,6 @@ logs/
 
 # Uploads and generated files
 uploads/
-reports/
+/reports/
+backend/reports/
 *.pptx
