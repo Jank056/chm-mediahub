@@ -96,7 +96,40 @@ class AuthService:
 
     @staticmethod
     def decode_token(token: str) -> Optional[TokenData]:
-        """Decode and validate a JWT token."""
+        """Decode and validate a JWT token.
+
+        Supports both GoTrue (Supabase) JWTs and MediaHub internal JWTs.
+        GoTrue tokens are tried first as they're the primary auth system.
+        """
+        # Try GoTrue JWT first (if configured)
+        if settings.gotrue_jwt_secret:
+            try:
+                payload = jwt.decode(
+                    token,
+                    settings.gotrue_jwt_secret,
+                    algorithms=[settings.jwt_algorithm],
+                    audience="authenticated"  # GoTrue uses this audience
+                )
+                # GoTrue JWT structure: sub=user_id, email, aud=authenticated
+                user_id = payload.get("sub")
+                email = payload.get("email")
+                # Role comes from user_metadata (set during migration)
+                user_metadata = payload.get("user_metadata", {})
+                role = user_metadata.get("mediahub_role", "viewer")
+
+                if user_id is None or email is None:
+                    pass  # Fall through to try MediaHub token
+                else:
+                    return TokenData(
+                        user_id=user_id,
+                        email=email,
+                        role=role,
+                        token_type="access"  # GoTrue tokens are always access tokens
+                    )
+            except JWTError:
+                pass  # Fall through to try MediaHub token
+
+        # Try MediaHub internal JWT
         try:
             payload = jwt.decode(
                 token,
@@ -122,9 +155,15 @@ class AuthService:
 
     @staticmethod
     def verify_access_token(token: str) -> Optional[TokenData]:
-        """Verify an access token."""
+        """Verify an access token.
+
+        Accepts both GoTrue tokens (type="access") and MediaHub tokens (type="access").
+        """
         token_data = AuthService.decode_token(token)
-        if token_data is None or token_data.token_type != "access":
+        if token_data is None:
+            return None
+        # GoTrue tokens are always access tokens, MediaHub tokens have explicit type
+        if token_data.token_type not in ("access", None):
             return None
         return token_data
 

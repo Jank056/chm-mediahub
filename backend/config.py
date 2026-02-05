@@ -26,11 +26,14 @@ class Settings(BaseSettings):
     # Redis
     redis_url: str = "redis://localhost:6379/0"
 
-    # JWT Auth
+    # JWT Auth (MediaHub internal)
     jwt_secret: str = "dev-secret-change-in-production"
     jwt_algorithm: str = "HS256"
     access_token_expire_minutes: int = 30
     refresh_token_expire_days: int = 7
+
+    # GoTrue/Supabase Auth (shared auth system)
+    gotrue_jwt_secret: str = ""  # Set to GOTRUE_JWT_SECRET value
 
     # External Services
     chatbot_api_url: str = "http://localhost:8000"
@@ -54,7 +57,7 @@ class Settings(BaseSettings):
     linkedin_client_id: str = ""
     linkedin_client_secret: str = ""
     linkedin_redirect_uri: str = "http://localhost:8002/api/oauth/linkedin/callback"
-    linkedin_scopes: str = "rw_organization_admin"
+    linkedin_scopes: str = "rw_organization_admin r_organization_social_feed"
     linkedin_org_urn: str = ""  # CHM's organization URN (urn:li:organization:XXXXX)
 
     # X/Twitter API (read-only analytics for CHM's official account)
