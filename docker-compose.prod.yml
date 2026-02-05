@@ -31,6 +31,42 @@ services:
     networks:
       - mediahub
 
+  gotrue:
+    image: supabase/gotrue:v2.143.0
+    container_name: mediahub-gotrue
+    restart: unless-stopped
+    environment:
+      GOTRUE_DB_DRIVER: postgres
+      DATABASE_URL: postgres://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-mediahub}?sslmode=disable&search_path=auth
+      GOTRUE_SITE_URL: https://mediahub.communityhealth.media
+      GOTRUE_URI_ALLOW_LIST: "https://mediahub.communityhealth.media,https://cht-platform-tool-demo.vercel.app,https://chmbot.communityhealth.media"
+      API_EXTERNAL_URL: https://mediahub.communityhealth.media/auth/v1
+      GOTRUE_API_HOST: 0.0.0.0
+      PORT: 9999
+      GOTRUE_JWT_SECRET: ${GOTRUE_JWT_SECRET}
+      GOTRUE_JWT_EXP: 3600
+      GOTRUE_JWT_AUD: authenticated
+      GOTRUE_EXTERNAL_EMAIL_ENABLED: "true"
+      GOTRUE_MAILER_AUTOCONFIRM: "false"
+      GOTRUE_SMTP_HOST: email-smtp.us-east-1.amazonaws.com
+      GOTRUE_SMTP_PORT: 587
+      GOTRUE_SMTP_USER: ${GOTRUE_SMTP_USER}
+      GOTRUE_SMTP_PASS: ${GOTRUE_SMTP_PASS}
+      GOTRUE_SMTP_ADMIN_EMAIL: sfregeau56@gmail.com
+      GOTRUE_MAILER_URLPATHS_CONFIRMATION: /auth/confirm
+      GOTRUE_MAILER_URLPATHS_RECOVERY: /auth/reset-password
+      GOTRUE_MAILER_URLPATHS_INVITE: /auth/accept-invite
+      GOTRUE_DISABLE_SIGNUP: "false"
+      GOTRUE_EXTERNAL_GOOGLE_ENABLED: "false"
+      GOTRUE_EXTERNAL_APPLE_ENABLED: "false"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - mediahub
+    ports:
+      - "9999:9999"
+
   backend:
     build:
       context: ./backend
@@ -43,6 +79,7 @@ services:
       DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-mediahub}
       REDIS_URL: redis://redis:6379/0
       JWT_SECRET: ${JWT_SECRET}
+      GOTRUE_JWT_SECRET: ${GOTRUE_JWT_SECRET}
       WEBHOOK_API_KEY: ${WEBHOOK_API_KEY}
       CHATBOT_API_URL: ${CHATBOT_API_URL:-http://100.51.125.89:8000}
       CORS_ORIGINS: ${CORS_ORIGINS:-["https://your-domain.com"]}
