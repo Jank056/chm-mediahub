@@ -18,6 +18,7 @@ class TokenData(BaseModel):
     email: str
     role: str
     token_type: str  # "access" or "refresh"
+    user_type: str = "internal"  # "internal" (MediaHub) or "external" (CHT Platform)
 
 
 class TokenPair(BaseModel):
@@ -113,9 +114,10 @@ class AuthService:
                 # GoTrue JWT structure: sub=user_id, email, aud=authenticated
                 user_id = payload.get("sub")
                 email = payload.get("email")
-                # Role comes from user_metadata (set during migration)
+                # User metadata contains role and user_type
                 user_metadata = payload.get("user_metadata", {})
                 role = user_metadata.get("mediahub_role", "viewer")
+                user_type = user_metadata.get("user_type", "external")  # Default to external for safety
 
                 if user_id is None or email is None:
                     pass  # Fall through to try MediaHub token
@@ -124,7 +126,8 @@ class AuthService:
                         user_id=user_id,
                         email=email,
                         role=role,
-                        token_type="access"  # GoTrue tokens are always access tokens
+                        token_type="access",  # GoTrue tokens are always access tokens
+                        user_type=user_type,
                     )
             except JWTError:
                 pass  # Fall through to try MediaHub token
@@ -148,7 +151,8 @@ class AuthService:
                 user_id=user_id,
                 email=email,
                 role=role,
-                token_type=token_type
+                token_type=token_type,
+                user_type="internal",  # MediaHub internal JWTs are always internal users
             )
         except JWTError:
             return None
@@ -164,6 +168,20 @@ class AuthService:
             return None
         # GoTrue tokens are always access tokens, MediaHub tokens have explicit type
         if token_data.token_type not in ("access", None):
+            return None
+        return token_data
+
+    @staticmethod
+    def verify_internal_access_token(token: str) -> Optional[TokenData]:
+        """Verify an access token belongs to an internal user.
+
+        Only internal users (user_type="internal") can access MediaHub.
+        External users (CHT Platform signups) are rejected.
+        """
+        token_data = AuthService.verify_access_token(token)
+        if token_data is None:
+            return None
+        if token_data.user_type != "internal":
             return None
         return token_data
 

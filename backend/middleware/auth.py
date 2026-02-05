@@ -18,14 +18,18 @@ async def get_current_user(
     credentials: Annotated[HTTPAuthorizationCredentials, Depends(security)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> User:
-    """Extract and validate the current user from JWT token."""
+    """Extract and validate the current user from JWT token.
+
+    Only internal users (user_type="internal") can access MediaHub.
+    External users (CHT Platform signups) are rejected.
+    """
     token = credentials.credentials
 
-    token_data = AuthService.verify_access_token(token)
+    token_data = AuthService.verify_internal_access_token(token)
     if token_data is None:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid or expired token",
+            detail="Invalid or expired token, or user not authorized for MediaHub",
             headers={"WWW-Authenticate": "Bearer"},
         )
 
