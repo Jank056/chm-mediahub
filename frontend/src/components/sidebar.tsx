@@ -7,14 +7,14 @@ import { useAuthStore } from "@/lib/auth-store";
 import { useState, useEffect } from "react";
 
 const navigation = [
-  { name: "Dashboard", href: "/dashboard", roles: ["superadmin", "admin", "editor", "viewer"] },
-  { name: "Clients", href: "/dashboard/clients", roles: ["superadmin", "admin", "editor", "viewer"] },
-  { name: "Analytics", href: "/dashboard/analytics", roles: ["superadmin", "admin", "editor", "viewer"] },
-  { name: "Clips", href: "/dashboard/clips", roles: ["superadmin", "admin", "editor", "viewer"] },
-  { name: "Chatbot", href: "/dashboard/chatbot", roles: ["superadmin", "admin", "editor", "viewer"] },
-  { name: "Reports", href: "/dashboard/reports", roles: ["superadmin", "admin", "editor"] },
-  { name: "Users", href: "/dashboard/users", roles: ["superadmin", "admin"] },
-  { name: "Settings", href: "/dashboard/settings", roles: ["superadmin", "admin"] },
+  { name: "Dashboard", href: "/dashboard", roles: ["superadmin", "admin", "editor", "viewer"], requiresClientAccess: false },
+  { name: "Clients", href: "/dashboard/clients", roles: ["superadmin", "admin", "editor", "viewer"], requiresClientAccess: true },
+  { name: "Analytics", href: "/dashboard/analytics", roles: ["superadmin", "admin", "editor", "viewer"], requiresClientAccess: true },
+  { name: "Clips", href: "/dashboard/clips", roles: ["superadmin", "admin", "editor", "viewer"], requiresClientAccess: true },
+  { name: "Chatbot", href: "/dashboard/chatbot", roles: ["superadmin", "admin", "editor", "viewer"], requiresClientAccess: false },
+  { name: "Reports", href: "/dashboard/reports", roles: ["superadmin", "admin", "editor"], requiresClientAccess: false },
+  { name: "Users", href: "/dashboard/users", roles: ["superadmin", "admin"], requiresClientAccess: false },
+  { name: "Settings", href: "/dashboard/settings", roles: ["superadmin", "admin"], requiresClientAccess: false },
 ];
 
 export function Sidebar() {
@@ -46,7 +46,10 @@ export function Sidebar() {
   };
 
   const filteredNav = navigation.filter(
-    (item) => user && item.roles.includes(user.role)
+    (item) =>
+      user &&
+      item.roles.includes(user.role) &&
+      (!item.requiresClientAccess || user.has_client_access)
   );
 
   const sidebarContent = (

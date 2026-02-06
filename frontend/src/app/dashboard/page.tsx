@@ -101,9 +101,12 @@ export default function DashboardPage() {
   const [recentPosts, setRecentPosts] = useState<PostMetrics[]>([]);
   const [topPosts, setTopPosts] = useState<PostMetrics[]>([]);
 
+  const hasClientAccess = user?.has_client_access ?? false;
+  const isAdmin = user?.role === "superadmin" || user?.role === "admin";
+
   useEffect(() => {
     // Fetch platform stats for admins
-    if (user?.role === "admin") {
+    if (isAdmin) {
       Promise.all([
         api.get("/api/linkedin/stats").catch(() => null),
         api.get("/api/x/stats").catch(() => null),
@@ -122,7 +125,7 @@ export default function DashboardPage() {
         setTopPosts(top as PostMetrics[]);
       });
     }
-  }, [user?.role]);
+  }, [isAdmin]);
 
   // Compute totals across connected platforms
   const totalFollowers =
@@ -139,6 +142,29 @@ export default function DashboardPage() {
     <div>
       <h1 className="text-2xl font-bold text-gray-900 mb-6">Dashboard</h1>
 
+      {/* Welcome view for users without client access */}
+      {!hasClientAccess && !isAdmin && (
+        <div className="space-y-6">
+          <div className="bg-white p-8 rounded-lg shadow text-center">
+            <h2 className="text-xl font-semibold text-gray-900 mb-2">
+              Welcome to MediaHub
+            </h2>
+            <p className="text-gray-600 mb-6 max-w-md mx-auto">
+              You don&apos;t have access to any client data yet. Use the Chatbot to explore
+              Community Health Media content, or contact an administrator to request access.
+            </p>
+            <a
+              href="/dashboard/chatbot"
+              className="inline-flex items-center px-6 py-3 bg-blue-600 text-white rounded-md hover:bg-blue-700 text-sm font-medium"
+            >
+              Open Chatbot
+            </a>
+          </div>
+        </div>
+      )}
+
+      {/* Full dashboard for users with client access or admins */}
+      {(hasClientAccess || isAdmin) && <>
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 lg:gap-6 mb-6 lg:mb-8">
         <div className="bg-white p-4 lg:p-6 rounded-lg shadow">
           <h3 className="text-sm font-medium text-gray-500">Welcome back</h3>
@@ -166,7 +192,7 @@ export default function DashboardPage() {
       </div>
 
       {/* Official CHM Channel Stats - Admin Only */}
-      {user?.role === "admin" && (
+      {isAdmin && (
         <>
         <div className="mb-4">
           <h2 className="text-lg font-semibold text-gray-900">Official CHM Channels</h2>
@@ -492,7 +518,7 @@ export default function DashboardPage() {
             </p>
           </a>
 
-          {(user?.role === "admin" || user?.role === "editor") && (
+          {(isAdmin || user?.role === "editor") && (
             <a
               href="/dashboard/reports"
               className="block p-4 border border-gray-200 rounded-lg hover:border-blue-500 hover:shadow transition-all"
@@ -505,6 +531,7 @@ export default function DashboardPage() {
           )}
         </div>
       </div>
+      </>}
     </div>
   );
 }
