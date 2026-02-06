@@ -9,6 +9,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from database import get_db
 from middleware.auth import require_roles
+from models.client import Client
+from models.client_user import ClientUser, ClientRole
 from models.user import User, UserRole
 
 router = APIRouter(prefix="/users", tags=["users"])
@@ -32,6 +34,11 @@ class UserUpdateRequest(BaseModel):
 
 class MessageResponse(BaseModel):
     message: str
+
+
+class GrantClientAccessRequest(BaseModel):
+    client_id: str
+    role: ClientRole = ClientRole.VIEWER
 
 
 # Endpoints - ALL require ADMIN
@@ -140,3 +147,66 @@ async def delete_user(
     await db.commit()
 
     return MessageResponse(message="User deleted")
+
+
+@router.post("/{user_id}/client-access", response_model=MessageResponse)
+async def grant_client_access(
+    user_id: str,
+    data: GrantClientAccessRequest,
+    current_user: Annotated[User, Depends(require_roles(UserRole.ADMIN))],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    """Grant a user access to a client (admin only)."""
+    # Verify user exists
+    user_result = await db.execute(select(User).where(User.id == user_id))
+    if not user_result.scalar_one_or_none():
+        raise HTTPException(status_code=404, detail="User not found")
+
+    # Verify client exists
+    client_result = await db.execute(select(Client).where(Client.id == data.client_id))
+    if not client_result.scalar_one_or_none():
+        raise HTTPException(status_code=404, detail="Client not found")
+
+    # Check if already granted
+    existing = await db.execute(
+        select(ClientUser).where(
+            ClientUser.user_id == user_id,
+            ClientUser.client_id == data.client_id,
+        )
+    )
+    if existing.scalar_one_or_none():
+        raise HTTPException(status_code=400, detail="User already has access to this client")
+
+    client_user = ClientUser(
+        user_id=user_id,
+        client_id=data.client_id,
+        role=data.role,
+    )
+    db.add(client_user)
+    await db.commit()
+
+    return MessageResponse(message="Client access granted")
+
+
+@router.delete("/{user_id}/client-access/{client_id}", response_model=MessageResponse)
+async def revoke_client_access(
+    user_id: str,
+    client_id: str,
+    current_user: Annotated[User, Depends(require_roles(UserRole.ADMIN))],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    """Revoke a user's access to a client (admin only)."""
+    result = await db.execute(
+        select(ClientUser).where(
+            ClientUser.user_id == user_id,
+            ClientUser.client_id == client_id,
+        )
+    )
+    client_user = result.scalar_one_or_none()
+    if not client_user:
+        raise HTTPException(status_code=404, detail="Client access record not found")
+
+    await db.delete(client_user)
+    await db.commit()
+
+    return MessageResponse(message="Client access revoked")

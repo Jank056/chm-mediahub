@@ -17,6 +17,7 @@ from models.client import Client
 from models.project import Project
 from models.kol import KOL, KOLGroup, KOLGroupMember
 from models.client_user import ClientUser, ClientRole
+from models.access_request import AccessRequest, AccessRequestStatus
 
 # Platform connections
 from models.platform_connection import (
@@ -50,6 +51,8 @@ __all__ = [
     "KOLGroupMember",
     "ClientUser",
     "ClientRole",
+    "AccessRequest",
+    "AccessRequestStatus",
     # Platform connections
     "PlatformConnection",
     "Platform",

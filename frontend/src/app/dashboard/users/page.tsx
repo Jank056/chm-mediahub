@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { usersApi, authApi } from "@/lib/api";
+import { usersApi, authApi, accessRequestsApi, type AccessRequestData } from "@/lib/api";
 import { useAuthStore } from "@/lib/auth-store";
 import { ProtectedRoute } from "@/components/protected-route";
 
@@ -55,15 +55,19 @@ export default function UsersPage() {
   const [error, setError] = useState("");
   const [createdInviteLink, setCreatedInviteLink] = useState<string | null>(null);
   const [copiedId, setCopiedId] = useState<string | null>(null);
+  const [accessRequests, setAccessRequests] = useState<AccessRequestData[]>([]);
+  const [processingRequestId, setProcessingRequestId] = useState<string | null>(null);
 
   const fetchData = async () => {
     try {
-      const [usersData, invitationsData] = await Promise.all([
+      const [usersData, invitationsData, requestsData] = await Promise.all([
         usersApi.list(),
         authApi.listInvitations(),
+        accessRequestsApi.list(),
       ]);
       setUsers(usersData);
       setInvitations(invitationsData);
+      setAccessRequests(requestsData);
     } catch (err) {
       console.error("Failed to fetch data:", err);
     } finally {
@@ -157,6 +161,30 @@ export default function UsersPage() {
       fetchData();
     } catch (err) {
       console.error("Failed to revoke invitation:", err);
+    }
+  };
+
+  const handleApproveRequest = async (requestId: string) => {
+    setProcessingRequestId(requestId);
+    try {
+      await accessRequestsApi.approve(requestId);
+      fetchData();
+    } catch (err) {
+      console.error("Failed to approve request:", err);
+    } finally {
+      setProcessingRequestId(null);
+    }
+  };
+
+  const handleDenyRequest = async (requestId: string) => {
+    setProcessingRequestId(requestId);
+    try {
+      await accessRequestsApi.deny(requestId);
+      fetchData();
+    } catch (err) {
+      console.error("Failed to deny request:", err);
+    } finally {
+      setProcessingRequestId(null);
     }
   };
 
@@ -266,6 +294,75 @@ export default function UsersPage() {
             </tbody>
           </table>
         </div>
+
+        {/* Access Requests */}
+        {accessRequests.length > 0 && (
+          <div className="bg-white rounded-lg shadow mb-8">
+            <div className="px-6 py-4 border-b border-gray-200">
+              <h2 className="text-lg font-semibold text-gray-900">
+                Access Requests
+                <span className="ml-2 px-2 py-0.5 text-xs font-medium bg-yellow-100 text-yellow-800 rounded-full">
+                  {accessRequests.length}
+                </span>
+              </h2>
+            </div>
+            <table className="min-w-full divide-y divide-gray-200">
+              <thead className="bg-gray-50">
+                <tr>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">
+                    User
+                  </th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">
+                    Client
+                  </th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">
+                    Message
+                  </th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">
+                    Requested
+                  </th>
+                  <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase">
+                    Actions
+                  </th>
+                </tr>
+              </thead>
+              <tbody className="bg-white divide-y divide-gray-200">
+                {accessRequests.map((req) => (
+                  <tr key={req.id}>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                      {req.user_email}
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                      {req.client_name}
+                    </td>
+                    <td className="px-6 py-4 text-sm text-gray-500 max-w-xs truncate">
+                      {req.message || "—"}
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                      {new Date(req.created_at).toLocaleDateString()}
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap text-right text-sm space-x-3">
+                      <button
+                        onClick={() => handleApproveRequest(req.id)}
+                        disabled={processingRequestId === req.id}
+                        className="text-green-600 hover:text-green-900 disabled:opacity-50"
+                      >
+                        Approve
+                      </button>
+                      <button
+                        onClick={() => handleDenyRequest(req.id)}
+                        disabled={processingRequestId === req.id}
+                        className="text-red-600 hover:text-red-900 disabled:opacity-50"
+                      >
+                        Deny
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
 
         {/* Pending Invitations */}
         <div className="bg-white rounded-lg shadow">

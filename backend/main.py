@@ -12,6 +12,7 @@ from config import get_settings
 from database import engine
 from models import Base
 from routers import (
+    access_requests_router,
     analytics_router,
     auth_router,
     chat_router,
@@ -84,6 +85,7 @@ app.add_middleware(
 )
 
 # Include routers
+app.include_router(access_requests_router)
 app.include_router(analytics_router)
 app.include_router(auth_router)
 app.include_router(chat_router)

@@ -139,6 +139,64 @@ export const usersApi = {
     const response = await api.delete(`/users/${id}`);
     return response.data;
   },
+
+  grantClientAccess: async (userId: string, clientId: string, role: string = "viewer") => {
+    const response = await api.post(`/users/${userId}/client-access`, { client_id: clientId, role });
+    return response.data;
+  },
+
+  revokeClientAccess: async (userId: string, clientId: string) => {
+    const response = await api.delete(`/users/${userId}/client-access/${clientId}`);
+    return response.data;
+  },
+};
+
+// Access Requests API
+export interface AccessRequestData {
+  id: string;
+  user_id: string;
+  user_email: string;
+  client_id: string;
+  client_name: string;
+  status: string;
+  message: string | null;
+  created_at: string;
+  reviewed_at: string | null;
+}
+
+export interface AvailableClient {
+  id: string;
+  name: string;
+  slug: string;
+  logo_url: string | null;
+  has_pending_request: boolean;
+}
+
+export const accessRequestsApi = {
+  list: async (): Promise<AccessRequestData[]> => {
+    const response = await api.get("/access-requests");
+    return response.data;
+  },
+
+  availableClients: async (): Promise<AvailableClient[]> => {
+    const response = await api.get("/access-requests/available-clients");
+    return response.data;
+  },
+
+  create: async (clientId: string, message: string = ""): Promise<AccessRequestData> => {
+    const response = await api.post("/access-requests", { client_id: clientId, message });
+    return response.data;
+  },
+
+  approve: async (requestId: string) => {
+    const response = await api.post(`/access-requests/${requestId}/approve`);
+    return response.data;
+  },
+
+  deny: async (requestId: string) => {
+    const response = await api.post(`/access-requests/${requestId}/deny`);
+    return response.data;
+  },
 };
 
 // Analytics Types

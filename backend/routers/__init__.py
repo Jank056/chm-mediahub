@@ -1,5 +1,6 @@
 """Routers package."""
 
+from .access_requests import router as access_requests_router
 from .analytics import router as analytics_router
 from .auth import router as auth_router
 from .chat import router as chat_router
@@ -15,6 +16,7 @@ from .x import router as x_router
 from .youtube import router as youtube_router
 
 __all__ = [
+    "access_requests_router",
     "analytics_router",
     "auth_router",
     "chat_router",

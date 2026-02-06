@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { useAuthStore } from "@/lib/auth-store";
-import { api, analyticsApi, type PostMetrics } from "@/lib/api";
+import { api, analyticsApi, accessRequestsApi, type PostMetrics, type AvailableClient } from "@/lib/api";
 
 interface LinkedInStats {
   connected: boolean;
@@ -100,9 +100,32 @@ export default function DashboardPage() {
   const [instagramStats, setInstagramStats] = useState<InstagramStats | null>(null);
   const [recentPosts, setRecentPosts] = useState<PostMetrics[]>([]);
   const [topPosts, setTopPosts] = useState<PostMetrics[]>([]);
+  const [availableClients, setAvailableClients] = useState<AvailableClient[]>([]);
+  const [requestingClientId, setRequestingClientId] = useState<string | null>(null);
 
   const hasClientAccess = user?.has_client_access ?? false;
   const isAdmin = user?.role === "superadmin" || user?.role === "admin";
+
+  useEffect(() => {
+    // Fetch available clients for users without full access
+    if (!isAdmin && !hasClientAccess) {
+      accessRequestsApi.availableClients().then(setAvailableClients).catch(() => {});
+    }
+  }, [isAdmin, hasClientAccess]);
+
+  const handleRequestAccess = async (clientId: string) => {
+    setRequestingClientId(clientId);
+    try {
+      await accessRequestsApi.create(clientId);
+      setAvailableClients((prev) =>
+        prev.map((c) => (c.id === clientId ? { ...c, has_pending_request: true } : c))
+      );
+    } catch (err) {
+      console.error("Failed to request access:", err);
+    } finally {
+      setRequestingClientId(null);
+    }
+  };
 
   useEffect(() => {
     // Fetch platform stats for admins
@@ -151,7 +174,7 @@ export default function DashboardPage() {
             </h2>
             <p className="text-gray-600 mb-6 max-w-md mx-auto">
               You don&apos;t have access to any client data yet. Use the Chatbot to explore
-              Community Health Media content, or contact an administrator to request access.
+              Community Health Media content, or request access to a client below.
             </p>
             <a
               href="/dashboard/chatbot"
@@ -160,6 +183,35 @@ export default function DashboardPage() {
               Open Chatbot
             </a>
           </div>
+
+          {availableClients.length > 0 && (
+            <div>
+              <h3 className="text-lg font-semibold text-gray-900 mb-3">Available Clients</h3>
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                {availableClients.map((client) => (
+                  <div key={client.id} className="bg-white p-4 rounded-lg shadow flex items-center justify-between">
+                    <div className="min-w-0">
+                      <p className="font-medium text-gray-900 truncate">{client.name}</p>
+                      <p className="text-xs text-gray-500">{client.slug}</p>
+                    </div>
+                    {client.has_pending_request ? (
+                      <span className="flex-shrink-0 ml-3 px-3 py-1 text-xs font-medium bg-yellow-100 text-yellow-800 rounded-full">
+                        Pending
+                      </span>
+                    ) : (
+                      <button
+                        onClick={() => handleRequestAccess(client.id)}
+                        disabled={requestingClientId === client.id}
+                        className="flex-shrink-0 ml-3 px-3 py-1 text-xs font-medium bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:opacity-50"
+                      >
+                        {requestingClientId === client.id ? "Requesting..." : "Request Access"}
+                      </button>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
       )}
 
