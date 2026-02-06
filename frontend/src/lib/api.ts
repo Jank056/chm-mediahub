@@ -119,6 +119,13 @@ export const authApi = {
 };
 
 // Users API
+export interface UserClientAccess {
+  client_id: string;
+  client_name: string;
+  client_slug: string;
+  role: string;
+}
+
 export const usersApi = {
   list: async () => {
     const response = await api.get("/users");
@@ -127,6 +134,11 @@ export const usersApi = {
 
   get: async (id: string) => {
     const response = await api.get(`/users/${id}`);
+    return response.data;
+  },
+
+  getClientAccess: async (userId: string): Promise<UserClientAccess[]> => {
+    const response = await api.get(`/users/${userId}/client-access`);
     return response.data;
   },
 

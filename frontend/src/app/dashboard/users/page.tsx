@@ -1,7 +1,7 @@
 "use client";
 
-import { useState, useEffect } from "react";
-import { usersApi, authApi, accessRequestsApi, type AccessRequestData } from "@/lib/api";
+import { useState, useEffect, Fragment } from "react";
+import { usersApi, authApi, accessRequestsApi, clientsApi, type AccessRequestData, type UserClientAccess, type ClientSummary } from "@/lib/api";
 import { useAuthStore } from "@/lib/auth-store";
 import { ProtectedRoute } from "@/components/protected-route";
 
@@ -10,6 +10,7 @@ interface User {
   email: string;
   role: string;
   is_active: boolean;
+  client_count: number;
 }
 
 interface Invitation {
@@ -57,6 +58,12 @@ export default function UsersPage() {
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [accessRequests, setAccessRequests] = useState<AccessRequestData[]>([]);
   const [processingRequestId, setProcessingRequestId] = useState<string | null>(null);
+  const [expandedUserId, setExpandedUserId] = useState<string | null>(null);
+  const [userClientAccess, setUserClientAccess] = useState<UserClientAccess[]>([]);
+  const [allClients, setAllClients] = useState<ClientSummary[]>([]);
+  const [grantClientId, setGrantClientId] = useState("");
+  const [grantRole, setGrantRole] = useState("viewer");
+  const [accessLoading, setAccessLoading] = useState(false);
 
   const fetchData = async () => {
     try {
@@ -188,6 +195,54 @@ export default function UsersPage() {
     }
   };
 
+  const handleExpandUser = async (userId: string) => {
+    if (expandedUserId === userId) {
+      setExpandedUserId(null);
+      return;
+    }
+    setExpandedUserId(userId);
+    setAccessLoading(true);
+    setGrantClientId("");
+    setGrantRole("viewer");
+    try {
+      const [access, clients] = await Promise.all([
+        usersApi.getClientAccess(userId),
+        allClients.length ? Promise.resolve(allClients) : clientsApi.list(),
+      ]);
+      setUserClientAccess(access);
+      if (!allClients.length) setAllClients(clients);
+    } catch (err) {
+      console.error("Failed to load client access:", err);
+    } finally {
+      setAccessLoading(false);
+    }
+  };
+
+  const handleGrantAccess = async (userId: string) => {
+    if (!grantClientId) return;
+    try {
+      await usersApi.grantClientAccess(userId, grantClientId, grantRole);
+      setGrantClientId("");
+      setGrantRole("viewer");
+      const access = await usersApi.getClientAccess(userId);
+      setUserClientAccess(access);
+      fetchData();
+    } catch (err) {
+      console.error("Failed to grant access:", err);
+    }
+  };
+
+  const handleRevokeAccess = async (userId: string, clientId: string) => {
+    try {
+      await usersApi.revokeClientAccess(userId, clientId);
+      const access = await usersApi.getClientAccess(userId);
+      setUserClientAccess(access);
+      fetchData();
+    } catch (err) {
+      console.error("Failed to revoke access:", err);
+    }
+  };
+
   if (isLoading) {
     return (
       <div className="flex items-center justify-center h-64">
@@ -241,6 +296,9 @@ export default function UsersPage() {
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">
                   Status
                 </th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">
+                  Clients
+                </th>
                 <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase">
                   Actions
                 </th>
@@ -248,48 +306,128 @@ export default function UsersPage() {
             </thead>
             <tbody className="bg-white divide-y divide-gray-200">
               {users.map((user) => (
-                <tr key={user.id}>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                    {user.email}
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm">
-                    <span
-                      className={`px-2 py-1 inline-flex text-xs leading-5 font-semibold rounded-full ${ROLE_DESCRIPTIONS[user.role]?.color || "bg-gray-100 text-gray-800"}`}
-                      title={ROLE_DESCRIPTIONS[user.role]?.description}
-                    >
-                      {ROLE_DESCRIPTIONS[user.role]?.title || user.role}
-                    </span>
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap">
-                    <span
-                      className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${
-                        user.is_active
-                          ? "bg-green-100 text-green-800"
-                          : "bg-red-100 text-red-800"
-                      }`}
-                    >
-                      {user.is_active ? "Active" : "Inactive"}
-                    </span>
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-right text-sm space-x-3">
-                    {user.role !== "superadmin" && (
+                <Fragment key={user.id}>
+                  <tr>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                      {user.email}
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm">
+                      <span
+                        className={`px-2 py-1 inline-flex text-xs leading-5 font-semibold rounded-full ${ROLE_DESCRIPTIONS[user.role]?.color || "bg-gray-100 text-gray-800"}`}
+                        title={ROLE_DESCRIPTIONS[user.role]?.description}
+                      >
+                        {ROLE_DESCRIPTIONS[user.role]?.title || user.role}
+                      </span>
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap">
+                      <span
+                        className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${
+                          user.is_active
+                            ? "bg-green-100 text-green-800"
+                            : "bg-red-100 text-red-800"
+                        }`}
+                      >
+                        {user.is_active ? "Active" : "Inactive"}
+                      </span>
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm">
                       <button
-                        onClick={() => handleToggleActive(user)}
+                        onClick={() => handleExpandUser(user.id)}
                         className="text-blue-600 hover:text-blue-900"
                       >
-                        {user.is_active ? "Deactivate" : "Activate"}
+                        {user.client_count} client{user.client_count !== 1 ? "s" : ""}
+                        <span className="ml-1 text-xs">{expandedUserId === user.id ? "▲" : "▼"}</span>
                       </button>
-                    )}
-                    {currentUser?.role === "superadmin" && user.role !== "superadmin" && (
-                      <button
-                        onClick={() => handleDeleteUser(user)}
-                        className="text-red-600 hover:text-red-900"
-                      >
-                        Delete
-                      </button>
-                    )}
-                  </td>
-                </tr>
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap text-right text-sm space-x-3">
+                      {user.role !== "superadmin" && (
+                        <button
+                          onClick={() => handleToggleActive(user)}
+                          className="text-blue-600 hover:text-blue-900"
+                        >
+                          {user.is_active ? "Deactivate" : "Activate"}
+                        </button>
+                      )}
+                      {currentUser?.role === "superadmin" && user.role !== "superadmin" && (
+                        <button
+                          onClick={() => handleDeleteUser(user)}
+                          className="text-red-600 hover:text-red-900"
+                        >
+                          Delete
+                        </button>
+                      )}
+                    </td>
+                  </tr>
+                  {expandedUserId === user.id && (
+                    <tr>
+                      <td colSpan={5} className="px-6 py-4 bg-gray-50">
+                        {accessLoading ? (
+                          <div className="flex items-center gap-2 text-sm text-gray-500">
+                            <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-600"></div>
+                            Loading...
+                          </div>
+                        ) : (
+                          <div className="space-y-3">
+                            <h4 className="text-sm font-medium text-gray-700">Client Access</h4>
+                            {userClientAccess.length === 0 ? (
+                              <p className="text-sm text-gray-500">No client access granted.</p>
+                            ) : (
+                              <div className="flex flex-wrap gap-2">
+                                {userClientAccess.map((ca) => (
+                                  <span
+                                    key={ca.client_id}
+                                    className="inline-flex items-center gap-1.5 px-3 py-1 bg-white border border-gray-200 rounded-full text-sm"
+                                  >
+                                    <span className="font-medium text-gray-700">{ca.client_name}</span>
+                                    <span className="text-xs text-gray-400 capitalize">({ca.role})</span>
+                                    <button
+                                      onClick={() => handleRevokeAccess(user.id, ca.client_id)}
+                                      className="ml-1 text-gray-400 hover:text-red-600"
+                                      title="Revoke access"
+                                    >
+                                      &times;
+                                    </button>
+                                  </span>
+                                ))}
+                              </div>
+                            )}
+                            {/* Grant new access */}
+                            <div className="flex items-center gap-2 pt-2 border-t border-gray-200">
+                              <select
+                                value={grantClientId}
+                                onChange={(e) => setGrantClientId(e.target.value)}
+                                className="text-sm border border-gray-300 rounded-md px-2 py-1"
+                              >
+                                <option value="">Select client...</option>
+                                {allClients
+                                  .filter((c) => !userClientAccess.some((ca) => ca.client_id === c.id))
+                                  .map((c) => (
+                                    <option key={c.id} value={c.id}>{c.name}</option>
+                                  ))}
+                              </select>
+                              <select
+                                value={grantRole}
+                                onChange={(e) => setGrantRole(e.target.value)}
+                                className="text-sm border border-gray-300 rounded-md px-2 py-1"
+                              >
+                                <option value="viewer">Viewer</option>
+                                <option value="editor">Editor</option>
+                                <option value="admin">Admin</option>
+                              </select>
+                              <button
+                                onClick={() => handleGrantAccess(user.id)}
+                                disabled={!grantClientId}
+                                className="px-3 py-1 text-sm bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                              >
+                                Grant
+                              </button>
+                            </div>
+                          </div>
+                        )}
+                      </td>
+                    </tr>
+                  )}
+                </Fragment>
               ))}
             </tbody>
           </table>

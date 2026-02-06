@@ -4,7 +4,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from database import get_db
@@ -22,9 +22,17 @@ class UserResponse(BaseModel):
     email: str
     role: str
     is_active: bool
+    client_count: int = 0
 
     class Config:
         from_attributes = True
+
+
+class UserClientAccessItem(BaseModel):
+    client_id: str
+    client_name: str
+    client_slug: str
+    role: str
 
 
 class UserUpdateRequest(BaseModel):
@@ -47,9 +55,27 @@ async def list_users(
     current_user: Annotated[User, Depends(require_roles(UserRole.ADMIN))],
     db: Annotated[AsyncSession, Depends(get_db)],
 ):
-    """List all users (admin only)."""
+    """List all users with client counts (admin only)."""
     result = await db.execute(select(User).order_by(User.created_at.desc()))
-    return result.scalars().all()
+    users = result.scalars().all()
+
+    # Get client counts per user in a single query
+    count_result = await db.execute(
+        select(ClientUser.user_id, func.count(ClientUser.id))
+        .group_by(ClientUser.user_id)
+    )
+    counts = dict(count_result.fetchall())
+
+    return [
+        UserResponse(
+            id=u.id,
+            email=u.email,
+            role=u.role.value,
+            is_active=u.is_active,
+            client_count=counts.get(u.id, 0),
+        )
+        for u in users
+    ]
 
 
 @router.get("/{user_id}", response_model=UserResponse)
@@ -147,6 +173,30 @@ async def delete_user(
     await db.commit()
 
     return MessageResponse(message="User deleted")
+
+
+@router.get("/{user_id}/client-access", response_model=list[UserClientAccessItem])
+async def list_user_client_access(
+    user_id: str,
+    current_user: Annotated[User, Depends(require_roles(UserRole.ADMIN))],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    """List a user's client access records (admin only)."""
+    result = await db.execute(
+        select(ClientUser, Client.name, Client.slug)
+        .join(Client, ClientUser.client_id == Client.id)
+        .where(ClientUser.user_id == user_id)
+        .order_by(Client.name)
+    )
+    return [
+        UserClientAccessItem(
+            client_id=cu.client_id,
+            client_name=name,
+            client_slug=slug,
+            role=cu.role.value,
+        )
+        for cu, name, slug in result.fetchall()
+    ]
 
 
 @router.post("/{user_id}/client-access", response_model=MessageResponse)
