@@ -18,6 +18,7 @@ from middleware.rate_limit import limiter
 from models.user import User, UserRole
 from models.invitation import Invitation
 from services.auth_service import AuthService, TokenPair
+from services.recaptcha import verify_recaptcha
 from services.redis_store import RedisStore
 
 router = APIRouter(prefix="/auth", tags=["auth"])
@@ -61,6 +62,12 @@ class InviteRequest(BaseModel):
 class AcceptInviteRequest(BaseModel):
     token: str
     password: str
+
+
+class SignupRequest(BaseModel):
+    email: EmailStr
+    password: str
+    recaptcha_token: str = ""
 
 
 class UserResponse(BaseModel):
@@ -179,6 +186,52 @@ async def get_current_user_info(
         is_active=user.is_active,
         client_ids=client_ids or [],
         has_client_access=client_ids is None or len(client_ids) > 0,
+    )
+
+
+@router.post("/signup", response_model=TokenPairWithWarnings)
+@limiter.limit("3/minute")
+async def signup(
+    request: Request,
+    signup_data: SignupRequest,
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    """Public self-registration. Creates a VIEWER account with no client access."""
+    # Verify reCAPTCHA
+    if not await verify_recaptcha(signup_data.recaptcha_token):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="reCAPTCHA verification failed. Please try again.",
+        )
+
+    # Check if email already taken
+    result = await db.execute(select(User).where(User.email == signup_data.email))
+    if result.scalar_one_or_none():
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="An account with this email already exists.",
+        )
+
+    # Check password strength
+    password_warnings = check_password_strength(signup_data.password)
+
+    # Create user as VIEWER with no client access
+    user = User(
+        email=signup_data.email,
+        password_hash=AuthService.hash_password(signup_data.password),
+        role=UserRole.VIEWER,
+        auth_method="password",
+    )
+    db.add(user)
+    await db.commit()
+    await db.refresh(user)
+
+    tokens = AuthService.create_token_pair(user.id, user.email, user.role.value)
+    return TokenPairWithWarnings(
+        access_token=tokens.access_token,
+        refresh_token=tokens.refresh_token,
+        token_type=tokens.token_type,
+        password_warnings=password_warnings,
     )
 
 
@@ -446,7 +499,7 @@ async def login_google_complete(
     data: GoogleLoginRequest,
     db: Annotated[AsyncSession, Depends(get_db)],
 ):
-    """Complete Google login. Verifies GoTrue token and issues MediaHub JWT."""
+    """Complete Google login/signup. Auto-creates VIEWER account if new user."""
     google_email = AuthService.extract_email_from_gotrue_token(data.gotrue_access_token)
     if not google_email:
         raise HTTPException(status_code=401, detail="Invalid Google authentication token")
@@ -456,10 +509,17 @@ async def login_google_complete(
     user = result.scalar_one_or_none()
 
     if not user:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="No account found for this email. Contact your administrator for an invitation.",
+        # Auto-register as VIEWER with Google auth
+        user = User(
+            email=google_email,
+            password_hash=None,
+            auth_method="google",
+            role=UserRole.VIEWER,
         )
+        db.add(user)
+        await db.commit()
+        await db.refresh(user)
+        return AuthService.create_token_pair(user.id, user.email, user.role.value)
 
     if user.auth_method != "google":
         raise HTTPException(

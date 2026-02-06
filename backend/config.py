@@ -79,6 +79,11 @@ class Settings(BaseSettings):
     # Instagram (accessed via Facebook Graph API, same Meta App)
     instagram_business_account_id: str = ""
 
+    # reCAPTCHA
+    recaptcha_secret_key: str = ""
+    recaptcha_enabled: bool = True
+    recaptcha_min_score: float = 0.5
+
     # CORS
     cors_origins: list[str] = ["http://localhost:3001", "http://127.0.0.1:3001"]
 

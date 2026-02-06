@@ -97,6 +97,9 @@ services:
       YOUTUBE_API_KEY: ${YOUTUBE_API_KEY}
       YOUTUBE_CHANNEL_ID: ${YOUTUBE_CHANNEL_ID}
       YOUTUBE_CHANNEL_HANDLE: ${YOUTUBE_CHANNEL_HANDLE}
+      # reCAPTCHA
+      RECAPTCHA_SECRET_KEY: ${RECAPTCHA_SECRET_KEY:-}
+      RECAPTCHA_ENABLED: ${RECAPTCHA_ENABLED:-false}
     depends_on:
       postgres:
         condition: service_healthy
@@ -117,11 +120,13 @@ services:
       args:
         NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8002}
         NEXT_PUBLIC_CHATBOT_URL: ${NEXT_PUBLIC_CHATBOT_URL:-http://localhost:8000}
+        NEXT_PUBLIC_RECAPTCHA_SITE_KEY: ${NEXT_PUBLIC_RECAPTCHA_SITE_KEY:-}
     container_name: mediahub-frontend
     restart: unless-stopped
     environment:
       NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8002}
       NEXT_PUBLIC_CHATBOT_URL: ${NEXT_PUBLIC_CHATBOT_URL:-http://localhost:8000}
+      NEXT_PUBLIC_RECAPTCHA_SITE_KEY: ${NEXT_PUBLIC_RECAPTCHA_SITE_KEY:-}
     depends_on:
       - backend
     networks:

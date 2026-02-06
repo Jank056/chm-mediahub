@@ -107,6 +107,15 @@ export const authApi = {
     });
     return response.data;
   },
+
+  signup: async (email: string, password: string, recaptchaToken: string) => {
+    const response = await api.post("/auth/signup", {
+      email,
+      password,
+      recaptcha_token: recaptchaToken,
+    });
+    return response.data;
+  },
 };
 
 // Users API
