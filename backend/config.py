@@ -34,6 +34,8 @@ class Settings(BaseSettings):
 
     # GoTrue/Supabase Auth (shared auth system)
     gotrue_jwt_secret: str = ""  # Set to GOTRUE_JWT_SECRET value
+    gotrue_external_url: str = "https://mediahub.communityhealth.media/auth/v1"
+    site_url: str = "https://mediahub.communityhealth.media"
 
     # External Services
     chatbot_api_url: str = "http://localhost:8000"

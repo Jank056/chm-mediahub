@@ -1,22 +1,31 @@
-"""Authentication router - login, logout, invitations."""
+"""Authentication router - login, logout, invitations, Google OAuth."""
 
 import re
+import secrets
 from datetime import datetime
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi.responses import RedirectResponse
 from pydantic import BaseModel, EmailStr
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from config import get_settings
 from database import get_db
 from middleware.auth import get_current_active_user, require_roles
 from middleware.rate_limit import limiter
 from models.user import User, UserRole
 from models.invitation import Invitation
 from services.auth_service import AuthService, TokenPair
+from services.redis_store import RedisStore
 
 router = APIRouter(prefix="/auth", tags=["auth"])
+settings = get_settings()
+
+# Redis key prefix for OAuth state
+OAUTH_STATE_PREFIX = "mediahub:oauth_state:"
+OAUTH_STATE_TTL = 600  # 10 minutes
 
 
 def check_password_strength(password: str) -> list[str]:
@@ -101,6 +110,12 @@ async def login(
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid email or password",
+        )
+
+    if user.auth_method == "google":
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="google_account",
         )
 
     if user.password_hash is None:
@@ -255,6 +270,192 @@ async def accept_invitation(
         token_type=tokens.token_type,
         password_warnings=password_warnings,
     )
+
+
+# --- Google OAuth Endpoints ---
+
+
+class ValidateInviteResponse(BaseModel):
+    valid: bool
+    email: str | None = None
+
+
+class GoogleLoginRequest(BaseModel):
+    gotrue_access_token: str
+
+
+class GoogleAcceptInviteRequest(BaseModel):
+    state: str
+    gotrue_access_token: str
+
+
+@router.get("/validate-invite", response_model=ValidateInviteResponse)
+async def validate_invite(
+    token: str,
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    """Check if an invite token is valid. Returns email for display."""
+    result = await db.execute(
+        select(Invitation).where(Invitation.token == token)
+    )
+    invitation = result.scalar_one_or_none()
+
+    if not invitation or invitation.is_expired or invitation.is_accepted:
+        return ValidateInviteResponse(valid=False)
+
+    return ValidateInviteResponse(valid=True, email=invitation.email)
+
+
+@router.get("/accept-invite/google")
+async def accept_invite_google_start(
+    token: str,
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    """Start Google OAuth for invite acceptance. Validates invite, then redirects to Google."""
+    result = await db.execute(
+        select(Invitation).where(Invitation.token == token)
+    )
+    invitation = result.scalar_one_or_none()
+
+    if not invitation:
+        raise HTTPException(status_code=404, detail="Invalid invitation token")
+    if invitation.is_expired:
+        raise HTTPException(status_code=400, detail="Invitation has expired")
+    if invitation.is_accepted:
+        raise HTTPException(status_code=400, detail="Invitation already accepted")
+
+    # Store invite token in Redis with a random state key
+    state = secrets.token_urlsafe(32)
+    redis_client = await RedisStore.get_client()
+    await redis_client.set(
+        f"{OAUTH_STATE_PREFIX}{state}",
+        token,
+        ex=OAUTH_STATE_TTL,
+    )
+
+    # Redirect to GoTrue Google OAuth
+    callback_url = f"{settings.site_url}/auth/callback/google?state={state}"
+    authorize_url = (
+        f"{settings.gotrue_external_url}/authorize"
+        f"?provider=google"
+        f"&redirect_to={callback_url}"
+    )
+    return RedirectResponse(url=authorize_url)
+
+
+@router.post("/accept-invite/google", response_model=TokenPair)
+@limiter.limit("10/minute")
+async def accept_invite_google_complete(
+    request: Request,
+    data: GoogleAcceptInviteRequest,
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    """Complete Google-based invite acceptance. Creates user account."""
+    # Look up invite token from Redis
+    redis_client = await RedisStore.get_client()
+    invite_token = await redis_client.get(f"{OAUTH_STATE_PREFIX}{data.state}")
+
+    if not invite_token:
+        raise HTTPException(status_code=400, detail="Invalid or expired OAuth state")
+
+    # Clean up state
+    await redis_client.delete(f"{OAUTH_STATE_PREFIX}{data.state}")
+
+    # Validate invitation
+    result = await db.execute(
+        select(Invitation).where(Invitation.token == invite_token)
+    )
+    invitation = result.scalar_one_or_none()
+
+    if not invitation:
+        raise HTTPException(status_code=404, detail="Invalid invitation token")
+    if invitation.is_expired:
+        raise HTTPException(status_code=400, detail="Invitation has expired")
+    if invitation.is_accepted:
+        raise HTTPException(status_code=400, detail="Invitation already accepted")
+
+    # Extract email from GoTrue token
+    google_email = AuthService.extract_email_from_gotrue_token(data.gotrue_access_token)
+    if not google_email:
+        raise HTTPException(status_code=401, detail="Invalid Google authentication token")
+
+    # Verify email matches invitation
+    if google_email.lower() != invitation.email.lower():
+        raise HTTPException(
+            status_code=400,
+            detail="Google account email does not match the invitation email",
+        )
+
+    # Check no existing user
+    result = await db.execute(select(User).where(User.email == invitation.email))
+    if result.scalar_one_or_none():
+        raise HTTPException(status_code=400, detail="User with this email already exists")
+
+    # Create user with Google auth
+    user = User(
+        email=invitation.email,
+        password_hash=None,
+        auth_method="google",
+        role=invitation.role,
+    )
+    db.add(user)
+
+    # Mark invitation accepted
+    invitation.accepted_at = datetime.utcnow()
+
+    await db.commit()
+    await db.refresh(user)
+
+    return AuthService.create_token_pair(user.id, user.email, user.role.value)
+
+
+@router.get("/login/google")
+async def login_google_start():
+    """Redirect to GoTrue Google OAuth for login."""
+    callback_url = f"{settings.site_url}/auth/callback/google-login"
+    authorize_url = (
+        f"{settings.gotrue_external_url}/authorize"
+        f"?provider=google"
+        f"&redirect_to={callback_url}"
+    )
+    return RedirectResponse(url=authorize_url)
+
+
+@router.post("/login/google", response_model=TokenPair)
+@limiter.limit("5/minute")
+async def login_google_complete(
+    request: Request,
+    data: GoogleLoginRequest,
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    """Complete Google login. Verifies GoTrue token and issues MediaHub JWT."""
+    google_email = AuthService.extract_email_from_gotrue_token(data.gotrue_access_token)
+    if not google_email:
+        raise HTTPException(status_code=401, detail="Invalid Google authentication token")
+
+    # Look up user
+    result = await db.execute(select(User).where(User.email == google_email))
+    user = result.scalar_one_or_none()
+
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="No account found for this email. Contact your administrator for an invitation.",
+        )
+
+    if user.auth_method != "google":
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="This account uses email/password login.",
+        )
+
+    if not user.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Account is deactivated",
+        )
+
+    return AuthService.create_token_pair(user.id, user.email, user.role.value)
 
 
 @router.get("/invitations", response_model=list[InvitationResponse])

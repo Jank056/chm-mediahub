@@ -49,6 +49,9 @@ class User(Base):
         nullable=False
     )
     last_login: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    auth_method: Mapped[str] = mapped_column(
+        String(20), default="password", server_default="password", nullable=False
+    )
 
     # Multi-tenant: track which client the user last viewed
     default_client_id: Mapped[str | None] = mapped_column(

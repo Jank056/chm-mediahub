@@ -15,6 +15,7 @@ interface AuthState {
   isAuthenticated: boolean;
 
   login: (email: string, password: string) => Promise<void>;
+  loginWithTokens: (accessToken: string, refreshToken: string) => Promise<void>;
   logout: () => void;
   fetchUser: () => Promise<void>;
   setUser: (user: User | null) => void;
@@ -38,6 +39,13 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     Cookies.set("access_token", tokens.access_token, { ...opts, expires: 1 });
     Cookies.set("refresh_token", tokens.refresh_token, { ...opts, expires: 7 });
 
+    await get().fetchUser();
+  },
+
+  loginWithTokens: async (accessToken: string, refreshToken: string) => {
+    const opts = getCookieOptions();
+    Cookies.set("access_token", accessToken, { ...opts, expires: 1 });
+    Cookies.set("refresh_token", refreshToken, { ...opts, expires: 7 });
     await get().fetchUser();
   },
 

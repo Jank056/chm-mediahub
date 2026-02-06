@@ -192,3 +192,23 @@ class AuthService:
         if token_data is None or token_data.token_type != "refresh":
             return None
         return token_data
+
+    @staticmethod
+    def extract_email_from_gotrue_token(token: str) -> Optional[str]:
+        """Extract verified email from a GoTrue access token.
+
+        Used during Google OAuth flows to verify the user's identity.
+        Returns the email if the token is valid, None otherwise.
+        """
+        if not settings.gotrue_jwt_secret:
+            return None
+        try:
+            payload = jwt.decode(
+                token,
+                settings.gotrue_jwt_secret,
+                algorithms=[settings.jwt_algorithm],
+                audience="authenticated",
+            )
+            return payload.get("email")
+        except JWTError:
+            return None

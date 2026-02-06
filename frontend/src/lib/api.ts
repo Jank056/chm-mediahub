@@ -85,6 +85,28 @@ export const authApi = {
     const response = await api.delete(`/auth/invitations/${id}`);
     return response.data;
   },
+
+  validateInvite: async (token: string) => {
+    const response = await api.get("/auth/validate-invite", {
+      params: { token },
+    });
+    return response.data as { valid: boolean; email: string | null };
+  },
+
+  acceptInviteGoogle: async (state: string, gotrueAccessToken: string) => {
+    const response = await api.post("/auth/accept-invite/google", {
+      state,
+      gotrue_access_token: gotrueAccessToken,
+    });
+    return response.data;
+  },
+
+  loginGoogle: async (gotrueAccessToken: string) => {
+    const response = await api.post("/auth/login/google", {
+      gotrue_access_token: gotrueAccessToken,
+    });
+    return response.data;
+  },
 };
 
 // Users API
