@@ -13,7 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from config import get_settings
 from database import get_db
-from middleware.auth import get_current_active_user, require_roles
+from middleware.auth import get_current_active_user, get_user_client_ids, require_roles
 from middleware.rate_limit import limiter
 from models.user import User, UserRole
 from models.invitation import Invitation
@@ -68,6 +68,8 @@ class UserResponse(BaseModel):
     email: str
     role: str
     is_active: bool
+    client_ids: list[str] = []
+    has_client_access: bool = False
 
     class Config:
         from_attributes = True
@@ -166,10 +168,18 @@ async def refresh_token(
 
 @router.get("/me", response_model=UserResponse)
 async def get_current_user_info(
-    current_user: Annotated[User, Depends(get_current_active_user)],
+    auth: Annotated[tuple[User, list[str] | None], Depends(get_user_client_ids)],
 ):
-    """Get current user information."""
-    return current_user
+    """Get current user information with client access."""
+    user, client_ids = auth
+    return UserResponse(
+        id=user.id,
+        email=user.email,
+        role=user.role.value,
+        is_active=user.is_active,
+        client_ids=client_ids or [],
+        has_client_access=client_ids is None or len(client_ids) > 0,
+    )
 
 
 @router.post("/invite", response_model=InvitationResponse)

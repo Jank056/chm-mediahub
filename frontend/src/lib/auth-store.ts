@@ -7,6 +7,8 @@ export interface User {
   email: string;
   role: "superadmin" | "admin" | "editor" | "viewer";
   is_active: boolean;
+  client_ids: string[];
+  has_client_access: boolean;
 }
 
 interface AuthState {

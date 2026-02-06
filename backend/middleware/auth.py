@@ -9,6 +9,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from database import get_db
 from models.user import User, UserRole
+from models.client import Client
+from models.client_user import ClientUser
 from services.auth_service import AuthService
 
 security = HTTPBearer()
@@ -75,3 +77,43 @@ def require_roles(*roles: UserRole):
             )
         return current_user
     return role_checker
+
+
+async def get_user_client_ids(
+    current_user: Annotated[User, Depends(get_current_active_user)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> tuple[User, list[str] | None]:
+    """Return (user, client_ids) where client_ids is None for full access.
+
+    SUPERADMIN and ADMIN see all clients (client_ids=None).
+    EDITOR and VIEWER see only their assigned clients.
+    """
+    if current_user.role in (UserRole.SUPERADMIN, UserRole.ADMIN):
+        return (current_user, None)
+
+    result = await db.execute(
+        select(ClientUser.client_id).where(ClientUser.user_id == current_user.id)
+    )
+    client_ids = [row[0] for row in result.fetchall()]
+    return (current_user, client_ids)
+
+
+async def verify_client_access(
+    slug: str,
+    client_ids: list[str] | None,
+    db: AsyncSession,
+) -> Client:
+    """Look up a client by slug and verify the user has access.
+
+    Returns the Client object if authorized.
+    Raises 404 if client not found, 403 if no access.
+    """
+    result = await db.execute(select(Client).where(Client.slug == slug))
+    client = result.scalar_one_or_none()
+    if not client:
+        raise HTTPException(status_code=404, detail="Client not found")
+
+    if client_ids is not None and client.id not in client_ids:
+        raise HTTPException(status_code=403, detail="You do not have access to this client")
+
+    return client

@@ -1,6 +1,6 @@
 """Client and Project API routes for multi-tenant MediaHub."""
 
-from typing import Optional
+from typing import Annotated, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -10,6 +10,8 @@ from datetime import datetime
 
 from database import get_db
 from models import Client, Project, KOLGroup, KOL, KOLGroupMember, Clip, Post, Shoot
+from models.user import User
+from middleware.auth import get_user_client_ids, verify_client_access
 
 router = APIRouter(prefix="/api/clients", tags=["clients"])
 
@@ -140,13 +142,17 @@ class AnalyticsSummary(BaseModel):
 
 @router.get("", response_model=list[ClientSchema])
 async def list_clients(
+    auth: Annotated[tuple[User, list[str] | None], Depends(get_user_client_ids)],
     db: AsyncSession = Depends(get_db),
     include_inactive: bool = Query(False, description="Include inactive clients")
 ):
     """List all clients with summary stats."""
+    _user, client_ids = auth
     query = select(Client)
     if not include_inactive:
         query = query.where(Client.is_active == True)
+    if client_ids is not None:
+        query = query.where(Client.id.in_(client_ids))
     query = query.order_by(Client.name)
 
     result = await db.execute(query)
@@ -191,15 +197,14 @@ async def list_clients(
 
 
 @router.get("/{slug}", response_model=ClientDetailSchema)
-async def get_client(slug: str, db: AsyncSession = Depends(get_db)):
+async def get_client(
+    slug: str,
+    auth: Annotated[tuple[User, list[str] | None], Depends(get_user_client_ids)],
+    db: AsyncSession = Depends(get_db),
+):
     """Get a single client with projects."""
-    result = await db.execute(
-        select(Client).where(Client.slug == slug)
-    )
-    client = result.scalar_one_or_none()
-
-    if not client:
-        raise HTTPException(status_code=404, detail="Client not found")
+    _user, client_ids = auth
+    client = await verify_client_access(slug, client_ids, db)
 
     # Get projects with stats
     proj_result = await db.execute(
@@ -263,13 +268,14 @@ async def get_client(slug: str, db: AsyncSession = Depends(get_db)):
 
 
 @router.get("/{slug}/analytics/summary", response_model=AnalyticsSummary)
-async def get_client_analytics_summary(slug: str, db: AsyncSession = Depends(get_db)):
+async def get_client_analytics_summary(
+    slug: str,
+    auth: Annotated[tuple[User, list[str] | None], Depends(get_user_client_ids)],
+    db: AsyncSession = Depends(get_db),
+):
     """Get analytics summary for a client."""
-    # Get client
-    result = await db.execute(select(Client).where(Client.slug == slug))
-    client = result.scalar_one_or_none()
-    if not client:
-        raise HTTPException(status_code=404, detail="Client not found")
+    _user, client_ids = auth
+    client = await verify_client_access(slug, client_ids, db)
 
     # Get all projects for this client
     proj_result = await db.execute(
@@ -332,13 +338,14 @@ async def get_client_analytics_summary(slug: str, db: AsyncSession = Depends(get
 # ============================================================================
 
 @router.get("/{slug}/projects", response_model=list[ProjectSchema])
-async def list_projects(slug: str, db: AsyncSession = Depends(get_db)):
+async def list_projects(
+    slug: str,
+    auth: Annotated[tuple[User, list[str] | None], Depends(get_user_client_ids)],
+    db: AsyncSession = Depends(get_db),
+):
     """List all projects for a client."""
-    # Get client
-    result = await db.execute(select(Client).where(Client.slug == slug))
-    client = result.scalar_one_or_none()
-    if not client:
-        raise HTTPException(status_code=404, detail="Client not found")
+    _user, client_ids = auth
+    client = await verify_client_access(slug, client_ids, db)
 
     # Get projects
     proj_result = await db.execute(
@@ -367,13 +374,15 @@ async def list_projects(slug: str, db: AsyncSession = Depends(get_db)):
 
 
 @router.get("/{slug}/projects/{code}", response_model=ProjectDetailSchema)
-async def get_project(slug: str, code: str, db: AsyncSession = Depends(get_db)):
+async def get_project(
+    slug: str,
+    code: str,
+    auth: Annotated[tuple[User, list[str] | None], Depends(get_user_client_ids)],
+    db: AsyncSession = Depends(get_db),
+):
     """Get a single project with KOL groups."""
-    # Get client
-    result = await db.execute(select(Client).where(Client.slug == slug))
-    client = result.scalar_one_or_none()
-    if not client:
-        raise HTTPException(status_code=404, detail="Client not found")
+    _user, client_ids = auth
+    client = await verify_client_access(slug, client_ids, db)
 
     # Get project
     proj_result = await db.execute(
@@ -431,13 +440,15 @@ async def get_project(slug: str, code: str, db: AsyncSession = Depends(get_db)):
 # ============================================================================
 
 @router.get("/{slug}/projects/{code}/kol-groups", response_model=list[KOLGroupSchema])
-async def list_kol_groups(slug: str, code: str, db: AsyncSession = Depends(get_db)):
+async def list_kol_groups(
+    slug: str,
+    code: str,
+    auth: Annotated[tuple[User, list[str] | None], Depends(get_user_client_ids)],
+    db: AsyncSession = Depends(get_db),
+):
     """List KOL groups for a project."""
-    # Get client and project
-    result = await db.execute(select(Client).where(Client.slug == slug))
-    client = result.scalar_one_or_none()
-    if not client:
-        raise HTTPException(status_code=404, detail="Client not found")
+    _user, client_ids = auth
+    client = await verify_client_access(slug, client_ids, db)
 
     proj_result = await db.execute(
         select(Project).where(Project.client_id == client.id, Project.code == code)
@@ -471,13 +482,16 @@ async def list_kol_groups(slug: str, code: str, db: AsyncSession = Depends(get_d
 
 
 @router.get("/{slug}/projects/{code}/kol-groups/{group_id}", response_model=KOLGroupDetailSchema)
-async def get_kol_group(slug: str, code: str, group_id: str, db: AsyncSession = Depends(get_db)):
+async def get_kol_group(
+    slug: str,
+    code: str,
+    group_id: str,
+    auth: Annotated[tuple[User, list[str] | None], Depends(get_user_client_ids)],
+    db: AsyncSession = Depends(get_db),
+):
     """Get a single KOL group with members, shoots, and clips."""
-    # Get client and project
-    result = await db.execute(select(Client).where(Client.slug == slug))
-    client = result.scalar_one_or_none()
-    if not client:
-        raise HTTPException(status_code=404, detail="Client not found")
+    _user, client_ids = auth
+    client = await verify_client_access(slug, client_ids, db)
 
     proj_result = await db.execute(
         select(Project).where(Project.client_id == client.id, Project.code == code)
@@ -594,9 +608,27 @@ async def get_kol_group(slug: str, code: str, group_id: str, db: AsyncSession = 
 # ============================================================================
 
 @router.get("/kols", response_model=list[KOLSchema], tags=["kols"])
-async def list_kols(db: AsyncSession = Depends(get_db)):
-    """List all KOLs (doctors)."""
-    result = await db.execute(select(KOL).order_by(KOL.name))
+async def list_kols(
+    auth: Annotated[tuple[User, list[str] | None], Depends(get_user_client_ids)],
+    db: AsyncSession = Depends(get_db),
+):
+    """List all KOLs (doctors). Scoped to user's accessible clients."""
+    _user, client_ids = auth
+
+    query = select(KOL).order_by(KOL.name)
+    if client_ids is not None:
+        # Only return KOLs that belong to groups in accessible clients
+        query = (
+            select(KOL)
+            .join(KOLGroupMember, KOLGroupMember.kol_id == KOL.id)
+            .join(KOLGroup, KOLGroup.id == KOLGroupMember.kol_group_id)
+            .join(Project, Project.id == KOLGroup.project_id)
+            .where(Project.client_id.in_(client_ids))
+            .distinct()
+            .order_by(KOL.name)
+        )
+
+    result = await db.execute(query)
     kols = result.scalars().all()
 
     return [KOLSchema(
