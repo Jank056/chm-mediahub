@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { usersApi, authApi } from "@/lib/api";
+import { useAuthStore } from "@/lib/auth-store";
 import { ProtectedRoute } from "@/components/protected-route";
 
 interface User {
@@ -21,6 +22,11 @@ interface Invitation {
 }
 
 const ROLE_DESCRIPTIONS: Record<string, { title: string; description: string; color: string }> = {
+  superadmin: {
+    title: "Super Admin",
+    description: "Full system control. Can delete users, change roles, and manage all settings.",
+    color: "bg-red-100 text-red-800",
+  },
   admin: {
     title: "Admin",
     description: "Full access including user management, invitations, and all features.",
@@ -39,6 +45,7 @@ const ROLE_DESCRIPTIONS: Record<string, { title: string; description: string; co
 };
 
 export default function UsersPage() {
+  const currentUser = useAuthStore((state) => state.user);
   const [users, setUsers] = useState<User[]>([]);
   const [invitations, setInvitations] = useState<Invitation[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -162,7 +169,7 @@ export default function UsersPage() {
   }
 
   return (
-    <ProtectedRoute allowedRoles={["admin"]}>
+    <ProtectedRoute allowedRoles={["superadmin", "admin"]}>
       <div>
         <div className="flex justify-between items-center mb-6">
           <h1 className="text-2xl font-bold text-gray-900">User Management</h1>
@@ -237,18 +244,22 @@ export default function UsersPage() {
                     </span>
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap text-right text-sm space-x-3">
-                    <button
-                      onClick={() => handleToggleActive(user)}
-                      className="text-blue-600 hover:text-blue-900"
-                    >
-                      {user.is_active ? "Deactivate" : "Activate"}
-                    </button>
-                    <button
-                      onClick={() => handleDeleteUser(user)}
-                      className="text-red-600 hover:text-red-900"
-                    >
-                      Delete
-                    </button>
+                    {user.role !== "superadmin" && (
+                      <button
+                        onClick={() => handleToggleActive(user)}
+                        className="text-blue-600 hover:text-blue-900"
+                      >
+                        {user.is_active ? "Deactivate" : "Activate"}
+                      </button>
+                    )}
+                    {currentUser?.role === "superadmin" && user.role !== "superadmin" && (
+                      <button
+                        onClick={() => handleDeleteUser(user)}
+                        className="text-red-600 hover:text-red-900"
+                      >
+                        Delete
+                      </button>
+                    )}
                   </td>
                 </tr>
               ))}

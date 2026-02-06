@@ -5,7 +5,7 @@ import { authApi } from "./api";
 export interface User {
   id: string;
   email: string;
-  role: "admin" | "editor" | "viewer";
+  role: "superadmin" | "admin" | "editor" | "viewer";
   is_active: boolean;
 }
 

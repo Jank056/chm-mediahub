@@ -178,7 +178,15 @@ async def invite_user(
     current_user: Annotated[User, Depends(require_roles(UserRole.ADMIN))],
     db: Annotated[AsyncSession, Depends(get_db)],
 ):
-    """Invite a new user by email (super admin only)."""
+    """Invite a new user by email (admin only). Only superadmin can invite admin roles."""
+    # Only superadmin can invite admin or superadmin roles
+    if current_user.role != UserRole.SUPERADMIN:
+        if request.role in (UserRole.ADMIN, UserRole.SUPERADMIN):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Only superadmin can invite admin users",
+            )
+
     # Check if user already exists
     result = await db.execute(select(User).where(User.email == request.email))
     existing_user = result.scalar_one_or_none()

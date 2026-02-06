@@ -59,10 +59,15 @@ async def get_current_active_user(
 
 
 def require_roles(*roles: UserRole):
-    """Create a dependency that requires specific roles."""
+    """Create a dependency that requires specific roles.
+
+    SUPERADMIN always passes any role check.
+    """
     async def role_checker(
         current_user: Annotated[User, Depends(get_current_active_user)],
     ) -> User:
+        if current_user.role == UserRole.SUPERADMIN:
+            return current_user
         if current_user.role not in roles:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,

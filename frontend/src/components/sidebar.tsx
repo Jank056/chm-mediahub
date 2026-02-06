@@ -7,14 +7,14 @@ import { useAuthStore } from "@/lib/auth-store";
 import { useState, useEffect } from "react";
 
 const navigation = [
-  { name: "Dashboard", href: "/dashboard", roles: ["admin", "editor", "viewer"] },
-  { name: "Clients", href: "/dashboard/clients", roles: ["admin", "editor", "viewer"] },
-  { name: "Analytics", href: "/dashboard/analytics", roles: ["admin", "editor", "viewer"] },
-  { name: "Clips", href: "/dashboard/clips", roles: ["admin", "editor", "viewer"] },
-  { name: "Chatbot", href: "/dashboard/chatbot", roles: ["admin", "editor", "viewer"] },
-  { name: "Reports", href: "/dashboard/reports", roles: ["admin", "editor"] },
-  { name: "Users", href: "/dashboard/users", roles: ["admin"] },
-  { name: "Settings", href: "/dashboard/settings", roles: ["admin"] },
+  { name: "Dashboard", href: "/dashboard", roles: ["superadmin", "admin", "editor", "viewer"] },
+  { name: "Clients", href: "/dashboard/clients", roles: ["superadmin", "admin", "editor", "viewer"] },
+  { name: "Analytics", href: "/dashboard/analytics", roles: ["superadmin", "admin", "editor", "viewer"] },
+  { name: "Clips", href: "/dashboard/clips", roles: ["superadmin", "admin", "editor", "viewer"] },
+  { name: "Chatbot", href: "/dashboard/chatbot", roles: ["superadmin", "admin", "editor", "viewer"] },
+  { name: "Reports", href: "/dashboard/reports", roles: ["superadmin", "admin", "editor"] },
+  { name: "Users", href: "/dashboard/users", roles: ["superadmin", "admin"] },
+  { name: "Settings", href: "/dashboard/settings", roles: ["superadmin", "admin"] },
 ];
 
 export function Sidebar() {
