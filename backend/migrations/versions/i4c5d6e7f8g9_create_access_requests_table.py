@@ -18,24 +18,36 @@ depends_on: Union[str, None] = None
 
 
 def upgrade() -> None:
-    # Create the enum type
-    op.execute("CREATE TYPE accessrequeststatus AS ENUM ('pending', 'approved', 'denied')")
+    # Create the enum type (IF NOT EXISTS for idempotency - app startup may create it)
+    op.execute("""
+        DO $$ BEGIN
+            CREATE TYPE accessrequeststatus AS ENUM ('pending', 'approved', 'denied');
+        EXCEPTION
+            WHEN duplicate_object THEN null;
+        END $$;
+    """)
 
-    op.create_table(
-        "access_requests",
-        sa.Column("id", UUID(as_uuid=False), primary_key=True),
-        sa.Column("user_id", UUID(as_uuid=False), sa.ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True),
-        sa.Column("client_id", UUID(as_uuid=False), sa.ForeignKey("clients.id", ondelete="CASCADE"), nullable=False, index=True),
-        sa.Column("status", sa.Enum("pending", "approved", "denied", name="accessrequeststatus", create_type=False), nullable=False, server_default="pending"),
-        sa.Column("message", sa.Text, nullable=True),
-        sa.Column("reviewed_by_id", UUID(as_uuid=False), sa.ForeignKey("users.id", ondelete="SET NULL"), nullable=True),
-        sa.Column("reviewed_at", sa.DateTime(timezone=True), nullable=True),
-        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now()),
-    )
+    # Create table only if it doesn't exist
+    op.execute("""
+        CREATE TABLE IF NOT EXISTS access_requests (
+            id UUID PRIMARY KEY,
+            user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            client_id UUID NOT NULL REFERENCES clients(id) ON DELETE CASCADE,
+            status accessrequeststatus NOT NULL DEFAULT 'pending',
+            message TEXT,
+            reviewed_by_id UUID REFERENCES users(id) ON DELETE SET NULL,
+            reviewed_at TIMESTAMP WITH TIME ZONE,
+            created_at TIMESTAMP WITH TIME ZONE DEFAULT now()
+        )
+    """)
+
+    # Create indexes if not exist
+    op.execute("CREATE INDEX IF NOT EXISTS ix_access_requests_user_id ON access_requests (user_id)")
+    op.execute("CREATE INDEX IF NOT EXISTS ix_access_requests_client_id ON access_requests (client_id)")
 
     # Partial unique index: one pending request per (user_id, client_id)
     op.execute("""
-        CREATE UNIQUE INDEX ix_access_requests_unique_pending
+        CREATE UNIQUE INDEX IF NOT EXISTS ix_access_requests_unique_pending
         ON access_requests (user_id, client_id)
         WHERE status = 'pending'
     """)
