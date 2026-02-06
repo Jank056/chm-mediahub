@@ -57,7 +57,10 @@ services:
       GOTRUE_MAILER_URLPATHS_RECOVERY: /auth/reset-password
       GOTRUE_MAILER_URLPATHS_INVITE: /auth/accept-invite
       GOTRUE_DISABLE_SIGNUP: "false"
-      GOTRUE_EXTERNAL_GOOGLE_ENABLED: "false"
+      GOTRUE_EXTERNAL_GOOGLE_ENABLED: "true"
+      GOTRUE_EXTERNAL_GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID}
+      GOTRUE_EXTERNAL_GOOGLE_SECRET: ${GOOGLE_CLIENT_SECRET}
+      GOTRUE_EXTERNAL_GOOGLE_REDIRECT_URI: https://mediahub.communityhealth.media/auth/v1/callback
       GOTRUE_EXTERNAL_APPLE_ENABLED: "false"
     depends_on:
       postgres:
