@@ -5,10 +5,18 @@ import { authApi } from "./api";
 export interface User {
   id: string;
   email: string;
+  name?: string;
   role: "superadmin" | "admin" | "editor" | "viewer";
   is_active: boolean;
   client_ids: string[];
   has_client_access: boolean;
+  job_title?: string;
+  company?: string;
+  phone?: string;
+  timezone?: string;
+  created_at?: string;
+  last_login?: string;
+  auth_method?: string;
 }
 
 interface AuthState {

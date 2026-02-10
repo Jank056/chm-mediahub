@@ -53,6 +53,14 @@ class User(Base):
         String(20), default="password", server_default="password", nullable=False
     )
 
+    # Profile fields
+    job_title: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    company: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    phone: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    timezone: Mapped[str | None] = mapped_column(
+        String(50), nullable=True, default="America/New_York"
+    )
+
     # Multi-tenant: track which client the user last viewed
     default_client_id: Mapped[str | None] = mapped_column(
         UUID(as_uuid=False),

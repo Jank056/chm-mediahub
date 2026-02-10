@@ -116,6 +116,25 @@ export const authApi = {
     });
     return response.data;
   },
+
+  updateProfile: async (data: {
+    name?: string;
+    job_title?: string;
+    company?: string;
+    phone?: string;
+    timezone?: string;
+  }) => {
+    const response = await api.patch("/auth/me", data);
+    return response.data;
+  },
+
+  changePassword: async (currentPassword: string, newPassword: string) => {
+    const response = await api.post("/auth/change-password", {
+      current_password: currentPassword,
+      new_password: newPassword,
+    });
+    return response.data;
+  },
 };
 
 // Users API

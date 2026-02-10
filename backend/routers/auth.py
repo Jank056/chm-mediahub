@@ -73,10 +73,18 @@ class SignupRequest(BaseModel):
 class UserResponse(BaseModel):
     id: str
     email: str
+    name: str | None = None
     role: str
     is_active: bool
     client_ids: list[str] = []
     has_client_access: bool = False
+    job_title: str | None = None
+    company: str | None = None
+    phone: str | None = None
+    timezone: str | None = None
+    created_at: datetime | None = None
+    last_login: datetime | None = None
+    auth_method: str | None = None
 
     class Config:
         from_attributes = True
@@ -182,11 +190,114 @@ async def get_current_user_info(
     return UserResponse(
         id=user.id,
         email=user.email,
+        name=user.name,
         role=user.role.value,
         is_active=user.is_active,
         client_ids=client_ids or [],
         has_client_access=client_ids is None or len(client_ids) > 0,
+        job_title=user.job_title,
+        company=user.company,
+        phone=user.phone,
+        timezone=user.timezone,
+        created_at=user.created_at,
+        last_login=user.last_login,
+        auth_method=user.auth_method,
     )
+
+
+class ProfileUpdateRequest(BaseModel):
+    name: str | None = None
+    job_title: str | None = None
+    company: str | None = None
+    phone: str | None = None
+    timezone: str | None = None
+
+
+class ChangePasswordRequest(BaseModel):
+    current_password: str
+    new_password: str
+
+
+@router.patch("/me", response_model=UserResponse)
+async def update_profile(
+    profile_data: ProfileUpdateRequest,
+    auth: Annotated[tuple[User, list[str] | None], Depends(get_user_client_ids)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    """Update current user's profile fields."""
+    import pytz
+
+    user, client_ids = auth
+
+    update_fields = profile_data.model_dump(exclude_unset=True)
+
+    if "timezone" in update_fields and update_fields["timezone"] is not None:
+        if update_fields["timezone"] not in pytz.common_timezones:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Invalid timezone: {update_fields['timezone']}",
+            )
+
+    for field, value in update_fields.items():
+        setattr(user, field, value)
+
+    await db.commit()
+    await db.refresh(user)
+
+    return UserResponse(
+        id=user.id,
+        email=user.email,
+        name=user.name,
+        role=user.role.value,
+        is_active=user.is_active,
+        client_ids=client_ids or [],
+        has_client_access=client_ids is None or len(client_ids) > 0,
+        job_title=user.job_title,
+        company=user.company,
+        phone=user.phone,
+        timezone=user.timezone,
+        created_at=user.created_at,
+        last_login=user.last_login,
+        auth_method=user.auth_method,
+    )
+
+
+@router.post("/change-password", response_model=MessageResponse)
+async def change_password(
+    password_data: ChangePasswordRequest,
+    current_user: Annotated[User, Depends(get_current_active_user)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    """Change current user's password. Requires current password verification."""
+    if current_user.auth_method != "password":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Password change is not available for Google OAuth accounts",
+        )
+
+    if current_user.password_hash is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="No password set for this account",
+        )
+
+    if not AuthService.verify_password(password_data.current_password, current_user.password_hash):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Current password is incorrect",
+        )
+
+    password_warnings = check_password_strength(password_data.new_password)
+    if password_warnings:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="; ".join(password_warnings),
+        )
+
+    current_user.password_hash = AuthService.hash_password(password_data.new_password)
+    await db.commit()
+
+    return MessageResponse(message="Password changed successfully")
 
 
 @router.post("/signup", response_model=TokenPairWithWarnings)
