@@ -40,3 +40,4 @@ uploads/
 /reports/
 backend/reports/
 *.pptx
+.claude/
