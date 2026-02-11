@@ -36,12 +36,20 @@ def extract_doctor_names_from_text(text: str) -> list[str]:
 
     surnames = set()
 
-    # Pattern 1: "Dr. Surname" or "Dr Surname"
-    dr_pattern = re.findall(r"(?:Dr\.?\s+)(\w+)", text, re.IGNORECASE)
-    for name in dr_pattern:
-        normalized = normalize_doctor_name(name)
-        if normalized and len(normalized) > 2:
-            surnames.add(normalized)
+    # Pattern 1: "Dr. Firstname Lastname" or "Dr. Surname"
+    # Capture 1-2 name-like words after "Dr." and add each as a potential surname.
+    # The KOL group matching step filters out non-name words (e.g. "Discuss").
+    # Name-word: "Bardia", "O'Shaughnessey", "O'Dea", etc.
+    _NW = r"[A-Z][a-z]*(?:['\u2019][A-Za-z]+)+"  # O'Shaughnessey
+    _NW2 = r"[A-Z][a-z]+"  # Standard names like Bardia
+    _NW_FULL = rf"(?:{_NW}|{_NW2})"
+    for m in re.finditer(rf"Dr\.?\s+({_NW_FULL})(?:\s+({_NW_FULL}))?", text):
+        for g in [m.group(1), m.group(2)]:
+            if not g:
+                continue
+            normalized = normalize_doctor_name(g)
+            if normalized and len(normalized) > 2:
+                surnames.add(normalized)
 
     # Pattern 2: Slash-separated names (common in CHM titles like "Mouabbi/Rimawi")
     slash_groups = re.findall(r"(\w+(?:/\w+)+)", text)
@@ -51,12 +59,15 @@ def extract_doctor_names_from_text(text: str) -> list[str]:
             if normalized and len(normalized) > 2:
                 surnames.add(normalized)
 
-    # Pattern 3: "with Dr. X and Dr. Y" or "featuring X"
-    with_pattern = re.findall(
-        r"(?:with|featuring|ft\.?)\s+(?:Dr\.?\s+)?(\w+)", text, re.IGNORECASE
-    )
-    for name in with_pattern:
-        normalized = normalize_doctor_name(name)
+    # Pattern 3: "featuring Hamilton" or "with Mouabbi" (without "Dr." prefix)
+    # Cases with "Dr." are already handled by Pattern 1.
+    for m in re.finditer(r"(?:with|featuring|ft\.?)\s+([A-Z][a-z'\u2019]+)", text):
+        word = m.group(1)
+        # Skip if preceded by "Dr." (already handled)
+        prefix = text[:m.start()]
+        if re.search(r"Dr\.?\s*$", prefix):
+            continue
+        normalized = normalize_doctor_name(word)
         if normalized and len(normalized) > 2:
             surnames.add(normalized)
 
