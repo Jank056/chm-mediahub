@@ -407,11 +407,17 @@ export const analyticsApi = {
     q?: string;
     platform?: string;
     status?: string;
+    tag?: string;
     sort_by?: "views" | "likes" | "recent" | "title" | "posted";
     limit?: number;
     offset?: number;
   }): Promise<ClipWithPosts[]> => {
     const response = await api.get("/analytics/clips/search", { params });
+    return response.data;
+  },
+
+  getTags: async (): Promise<Record<string, string[]>> => {
+    const response = await api.get("/analytics/tags");
     return response.data;
   },
 

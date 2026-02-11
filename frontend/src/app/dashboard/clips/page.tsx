@@ -81,6 +81,28 @@ const getStatusColor = (status: string) => {
   }
 };
 
+// Tag category display config
+const TAG_CATEGORIES: Record<string, { label: string; color: string }> = {
+  biomarker: { label: "Biomarker", color: "bg-purple-100 text-purple-800 border-purple-200" },
+  stage: { label: "Stage", color: "bg-amber-100 text-amber-800 border-amber-200" },
+  drug: { label: "Drug", color: "bg-blue-100 text-blue-800 border-blue-200" },
+  trial: { label: "Trial", color: "bg-green-100 text-green-800 border-green-200" },
+  topic: { label: "Topic", color: "bg-red-100 text-red-800 border-red-200" },
+  doctor: { label: "Doctor", color: "bg-teal-100 text-teal-800 border-teal-200" },
+  brand: { label: "Brand", color: "bg-gray-100 text-gray-800 border-gray-200" },
+};
+
+const getTagDisplay = (tag: string) => {
+  if (!tag.includes(":")) return { category: "other", value: tag, color: "bg-gray-100 text-gray-600" };
+  const [category, value] = tag.split(":", 2);
+  const config = TAG_CATEGORIES[category];
+  return {
+    category,
+    value,
+    color: config?.color || "bg-gray-100 text-gray-600 border-gray-200",
+  };
+};
+
 export default function ClipsPage() {
   const [clips, setClips] = useState<ClipWithPosts[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -93,19 +115,42 @@ export default function ClipsPage() {
   const [status, setStatus] = useState<string>("");
   const [sortBy, setSortBy] = useState<"views" | "likes" | "recent" | "title" | "posted">("views");
 
+  // Tag filters
+  const [availableTags, setAvailableTags] = useState<Record<string, string[]>>({});
+  const [selectedTags, setSelectedTags] = useState<string[]>([]);
+  const [expandedCategory, setExpandedCategory] = useState<string | null>(null);
+
   // Pagination
   const [offset, setOffset] = useState(0);
   const [hasMore, setHasMore] = useState(true);
   const LIMIT = 50;
 
+  // Load available tags on mount
+  useEffect(() => {
+    analyticsApi.getTags().then(setAvailableTags).catch(() => {});
+  }, []);
+
   // Debounce search query
   useEffect(() => {
     const timer = setTimeout(() => {
       setDebouncedQuery(searchQuery);
-      setOffset(0); // Reset pagination on search
+      setOffset(0);
     }, 300);
     return () => clearTimeout(timer);
   }, [searchQuery]);
+
+  const toggleTag = (fullTag: string) => {
+    setSelectedTags((prev) =>
+      prev.includes(fullTag) ? prev.filter((t) => t !== fullTag) : [...prev, fullTag]
+    );
+    setOffset(0);
+  };
+
+  const clearTags = () => {
+    setSelectedTags([]);
+    setExpandedCategory(null);
+    setOffset(0);
+  };
 
   const fetchClips = useCallback(async () => {
     setIsLoading(true);
@@ -115,6 +160,7 @@ export default function ClipsPage() {
         q: debouncedQuery || undefined,
         platform: platform || undefined,
         status: status || undefined,
+        tag: selectedTags.length > 0 ? selectedTags.join(",") : undefined,
         sort_by: sortBy,
         limit: LIMIT,
         offset,
@@ -127,7 +173,7 @@ export default function ClipsPage() {
     } finally {
       setIsLoading(false);
     }
-  }, [debouncedQuery, platform, status, sortBy, offset]);
+  }, [debouncedQuery, platform, status, selectedTags, sortBy, offset]);
 
   useEffect(() => {
     fetchClips();
@@ -244,6 +290,95 @@ export default function ClipsPage() {
         </div>
       </div>
 
+      {/* Tag Filters */}
+      {Object.keys(availableTags).length > 0 && (
+        <div className="bg-white rounded-lg shadow p-4">
+          {/* Active tag pills */}
+          {selectedTags.length > 0 && (
+            <div className="flex flex-wrap items-center gap-2 mb-3">
+              <span className="text-xs font-medium text-gray-500">Active filters:</span>
+              {selectedTags.map((tag) => {
+                const { category, value, color } = getTagDisplay(tag);
+                return (
+                  <button
+                    key={tag}
+                    onClick={() => toggleTag(tag)}
+                    className={`inline-flex items-center gap-1 px-2 py-0.5 text-xs font-medium rounded-full border ${color}`}
+                  >
+                    <span className="opacity-60">{TAG_CATEGORIES[category]?.label || category}:</span>
+                    {value}
+                    <svg className="w-3 h-3 ml-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                    </svg>
+                  </button>
+                );
+              })}
+              <button
+                onClick={clearTags}
+                className="text-xs text-gray-400 hover:text-gray-600 underline"
+              >
+                Clear all
+              </button>
+            </div>
+          )}
+
+          {/* Category chips */}
+          <div className="flex flex-wrap gap-2">
+            {Object.entries(availableTags)
+              .filter(([cat]) => TAG_CATEGORIES[cat])
+              .sort(([a], [b]) => {
+                const order = Object.keys(TAG_CATEGORIES);
+                return order.indexOf(a) - order.indexOf(b);
+              })
+              .map(([category, values]) => (
+                <div key={category} className="relative">
+                  <button
+                    onClick={() => setExpandedCategory(expandedCategory === category ? null : category)}
+                    className={`px-3 py-1.5 text-sm rounded-full border transition-colors ${
+                      expandedCategory === category
+                        ? "bg-blue-600 text-white border-blue-600"
+                        : selectedTags.some((t) => t.startsWith(category + ":"))
+                          ? "bg-blue-50 text-blue-700 border-blue-300"
+                          : "bg-gray-50 text-gray-700 border-gray-200 hover:bg-gray-100"
+                    }`}
+                  >
+                    {TAG_CATEGORIES[category]?.label || category}
+                    <span className="ml-1 opacity-60">({values.length})</span>
+                  </button>
+
+                  {/* Expanded values dropdown */}
+                  {expandedCategory === category && (
+                    <div className="absolute top-full left-0 mt-1 z-10 bg-white rounded-lg shadow-lg border border-gray-200 p-2 min-w-[200px] max-h-[300px] overflow-y-auto">
+                      {values.map((value) => {
+                        const fullTag = `${category}:${value}`;
+                        const isSelected = selectedTags.includes(fullTag);
+                        return (
+                          <button
+                            key={fullTag}
+                            onClick={() => toggleTag(fullTag)}
+                            className={`block w-full text-left px-3 py-1.5 text-sm rounded ${
+                              isSelected
+                                ? "bg-blue-50 text-blue-700 font-medium"
+                                : "text-gray-700 hover:bg-gray-50"
+                            }`}
+                          >
+                            {isSelected && (
+                              <svg className="w-3.5 h-3.5 inline mr-1.5" fill="currentColor" viewBox="0 0 20 20">
+                                <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+                              </svg>
+                            )}
+                            {value}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              ))}
+          </div>
+        </div>
+      )}
+
       {/* Error */}
       {error && (
         <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded">
@@ -291,17 +426,21 @@ export default function ClipsPage() {
                 {/* Tags */}
                 {clip.tags.length > 0 && (
                   <div className="flex flex-wrap gap-1 mb-3">
-                    {clip.tags.slice(0, 3).map((tag, i) => (
-                      <span
-                        key={i}
-                        className="px-2 py-0.5 text-xs bg-gray-100 text-gray-600 rounded"
-                      >
-                        {tag}
-                      </span>
-                    ))}
-                    {clip.tags.length > 3 && (
+                    {clip.tags.slice(0, 4).map((tag, i) => {
+                      const { value, color } = getTagDisplay(tag);
+                      return (
+                        <button
+                          key={i}
+                          onClick={() => toggleTag(tag)}
+                          className={`px-2 py-0.5 text-xs rounded border cursor-pointer hover:opacity-80 ${color}`}
+                        >
+                          {value}
+                        </button>
+                      );
+                    })}
+                    {clip.tags.length > 4 && (
                       <span className="px-2 py-0.5 text-xs text-gray-400">
-                        +{clip.tags.length - 3} more
+                        +{clip.tags.length - 4} more
                       </span>
                     )}
                   </div>

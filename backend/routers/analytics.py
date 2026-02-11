@@ -683,6 +683,36 @@ async def get_all_clips(
     ]
 
 
+@router.get("/tags", response_model=dict[str, list[str]])
+async def get_available_tags(
+    current_user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    """
+    Get all unique tags grouped by category prefix.
+
+    Tags use the format "category:value" (e.g., "biomarker:HER2+", "drug:Enhertu").
+    Returns a dict mapping category names to sorted lists of values.
+    """
+    from sqlalchemy import func, text
+
+    # Unnest all tags from all clips into individual rows
+    result = await db.execute(
+        text("SELECT DISTINCT unnest(tags) AS tag FROM clips WHERE tags IS NOT NULL AND array_length(tags, 1) > 0 ORDER BY tag")
+    )
+    all_tags = [row[0] for row in result]
+
+    grouped: dict[str, set[str]] = {}
+    for tag in all_tags:
+        if ":" in tag:
+            category, value = tag.split(":", 1)
+            grouped.setdefault(category, set()).add(value)
+        else:
+            grouped.setdefault("other", set()).add(tag)
+
+    return {k: sorted(v) for k, v in sorted(grouped.items())}
+
+
 @router.get("/clips/search", response_model=list[ClipWithPosts])
 async def search_clips(
     current_user: Annotated[User, Depends(get_current_user)],
@@ -690,6 +720,7 @@ async def search_clips(
     q: Optional[str] = Query(None, description="Search query for title, description, or tags"),
     platform: Optional[str] = None,
     status: Optional[str] = None,
+    tag: Optional[str] = Query(None, description="Filter by tags (comma-separated, e.g. 'biomarker:HER2+,stage:mBC')"),
     sort_by: str = Query("views", pattern="^(views|likes|recent|title|posted)$"),
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
@@ -700,6 +731,7 @@ async def search_clips(
     - q: Search query (searches title, description, and tags)
     - platform: Filter by platform (youtube, linkedin, x)
     - status: Filter by status (draft, ready, scheduled, published)
+    - tag: Filter by tags (comma-separated, clips must match ALL specified tags)
     - sort_by: views, likes, recent, title, or posted (by date posted)
     - limit/offset: Pagination
 
@@ -721,6 +753,12 @@ async def search_clips(
                 Clip.tags.any(q),  # Check if any tag matches
             )
         )
+
+    # Tag filter (AND logic — clip must contain ALL specified tags)
+    if tag:
+        tags_list = [t.strip() for t in tag.split(",") if t.strip()]
+        for t in tags_list:
+            query = query.where(Clip.tags.any(t))
 
     # Platform filter
     if platform:
