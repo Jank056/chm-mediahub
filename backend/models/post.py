@@ -9,7 +9,7 @@ from datetime import datetime
 from typing import Optional
 
 from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint, func
-from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.dialects.postgresql import ARRAY, JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from database import Base
@@ -51,6 +51,7 @@ class Post(Base):
     duration_seconds: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     is_short: Mapped[Optional[bool]] = mapped_column(Boolean, nullable=True)  # YouTube Shorts, etc.
     language: Mapped[Optional[str]] = mapped_column(String(10), nullable=True)
+    tags: Mapped[Optional[list[str]]] = mapped_column(ARRAY(String), nullable=True)  # ["biomarker:HER2+", "drug:Enhertu"]
     hashtags: Mapped[Optional[list]] = mapped_column(JSONB, nullable=True)  # ["tag1", "tag2"]
     mentions: Mapped[Optional[list]] = mapped_column(JSONB, nullable=True)  # ["@user1", "@user2"]
     media_urls: Mapped[Optional[list]] = mapped_column(JSONB, nullable=True)  # [{url, type, width, height}]

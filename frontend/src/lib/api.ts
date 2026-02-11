@@ -326,6 +326,32 @@ export interface TrendEntry {
   value: number;
 }
 
+// Unified content item (official + branded posts)
+export interface ContentItem {
+  id: string;
+  content_source: "branded" | "official";
+  title: string | null;
+  description: string | null;
+  platform: string;
+  tags: string[];
+  posted_at: string | null;
+  view_count: number;
+  like_count: number;
+  comment_count: number;
+  share_count: number;
+  thumbnail_url: string | null;
+  content_url: string | null;
+  content_type: string | null;
+  duration_seconds: number | null;
+  is_short: boolean | null;
+  clip_id: string | null;
+  status: string | null;
+  video_preview_url: string | null;
+  shoot_id: string | null;
+  shoot_name: string | null;
+  doctors: string[] | null;
+}
+
 // Analytics API
 export const analyticsApi = {
   getSummary: async (params?: {
@@ -418,6 +444,26 @@ export const analyticsApi = {
 
   getTags: async (): Promise<Record<string, string[]>> => {
     const response = await api.get("/analytics/tags");
+    return response.data;
+  },
+
+  searchContent: async (params?: {
+    q?: string;
+    platform?: string;
+    source?: "official" | "branded";
+    tag?: string;
+    content_type?: string;
+    is_short?: boolean;
+    sort_by?: "views" | "likes" | "posted_at" | "comments";
+    limit?: number;
+    offset?: number;
+  }): Promise<ContentItem[]> => {
+    const response = await api.get("/analytics/content/search", { params });
+    return response.data;
+  },
+
+  refreshTags: async (): Promise<{ official: Record<string, number>; branded_posts_updated: number }> => {
+    const response = await api.post("/analytics/tags/refresh");
     return response.data;
   },
 

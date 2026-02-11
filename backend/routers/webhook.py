@@ -281,6 +281,15 @@ async def sync_all(
                 .values(earliest_posted_at=earliest)
             )
 
+    # Propagate clip tags to branded posts
+    affected_clips_with_tags = [c for c in request.clips if c.tags]
+    for clip_data in affected_clips_with_tags:
+        await db.execute(
+            update(Post)
+            .where(Post.clip_id == clip_data.id)
+            .values(tags=clip_data.tags)
+        )
+
     await db.commit()
 
     return SyncResponse(

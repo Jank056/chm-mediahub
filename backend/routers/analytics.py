@@ -694,11 +694,18 @@ async def get_available_tags(
     Tags use the format "category:value" (e.g., "biomarker:HER2+", "drug:Enhertu").
     Returns a dict mapping category names to sorted lists of values.
     """
-    from sqlalchemy import func, text
+    from sqlalchemy import text
 
-    # Unnest all tags from all clips into individual rows
+    # Unnest all tags from both clips and posts into individual rows
     result = await db.execute(
-        text("SELECT DISTINCT unnest(tags) AS tag FROM clips WHERE tags IS NOT NULL AND array_length(tags, 1) > 0 ORDER BY tag")
+        text("""
+            SELECT DISTINCT tag FROM (
+                SELECT unnest(tags) AS tag FROM clips WHERE tags IS NOT NULL AND array_length(tags, 1) > 0
+                UNION
+                SELECT unnest(tags) AS tag FROM posts WHERE tags IS NOT NULL AND array_length(tags, 1) > 0
+            ) combined
+            ORDER BY tag
+        """)
     )
     all_tags = [row[0] for row in result]
 
@@ -917,3 +924,172 @@ async def get_metric_trends(
         TrendEntry(date=row.date.isoformat(), value=int(row.value))
         for row in result
     ]
+
+
+# ============== Unified Content ==============
+
+class ContentItem(BaseModel):
+    """Unified content item — wraps both branded clips and official posts."""
+    id: str
+    content_source: str  # "branded" or "official"
+    title: Optional[str]
+    description: Optional[str]
+    platform: str
+    tags: list[str]
+    posted_at: Optional[datetime]
+    # Metrics
+    view_count: int
+    like_count: int
+    comment_count: int
+    share_count: int
+    # Rich metadata
+    thumbnail_url: Optional[str] = None
+    content_url: Optional[str] = None
+    content_type: Optional[str] = None
+    duration_seconds: Optional[int] = None
+    is_short: Optional[bool] = None
+    # Clip-specific (null for official)
+    clip_id: Optional[str] = None
+    status: Optional[str] = None
+    video_preview_url: Optional[str] = None
+    # Linking
+    shoot_id: Optional[str] = None
+    shoot_name: Optional[str] = None
+    doctors: Optional[list[str]] = None
+
+
+@router.get("/content/search", response_model=list[ContentItem])
+async def search_content(
+    current_user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+    q: Optional[str] = Query(None, description="Search title, description, or tags"),
+    platform: Optional[str] = None,
+    source: Optional[str] = Query(None, pattern="^(official|branded)$"),
+    tag: Optional[str] = Query(None, description="Comma-separated tags, AND logic"),
+    content_type: Optional[str] = None,
+    is_short: Optional[bool] = None,
+    sort_by: str = Query("views", pattern="^(views|likes|posted_at|comments)$"),
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+):
+    """
+    Unified content search across both official and branded posts.
+
+    All posts now have tags (official posts get them via KOL group matching).
+    Returns a flat list of ContentItem objects, sorted and paginated.
+    """
+    from sqlalchemy import or_
+    from sqlalchemy.orm import selectinload
+
+    # Build query on Post table (all posts, both branded and official)
+    query = select(Post).outerjoin(Clip, Post.clip_id == Clip.id).outerjoin(
+        Shoot, Post.shoot_id == Shoot.id
+    )
+
+    # Source filter
+    query = _apply_source_filter(query, source)
+
+    # Text search
+    if q:
+        search_term = f"%{q}%"
+        query = query.where(
+            or_(
+                Post.title.ilike(search_term),
+                Post.description.ilike(search_term),
+                Post.tags.any(q),
+            )
+        )
+
+    # Tag filter (AND logic)
+    if tag:
+        tags_list = [t.strip() for t in tag.split(",") if t.strip()]
+        for t in tags_list:
+            query = query.where(Post.tags.any(t))
+
+    # Platform filter
+    if platform:
+        query = query.where(Post.platform == platform)
+
+    # Content type filter
+    if content_type:
+        query = query.where(Post.content_type == content_type)
+
+    # Shorts filter
+    if is_short is not None:
+        query = query.where(Post.is_short == is_short)
+
+    # Sorting
+    if sort_by == "views":
+        query = query.order_by(desc(Post.view_count))
+    elif sort_by == "likes":
+        query = query.order_by(desc(Post.like_count))
+    elif sort_by == "comments":
+        query = query.order_by(desc(Post.comment_count))
+    else:  # posted_at
+        query = query.order_by(desc(Post.posted_at))
+
+    # Pagination
+    query = query.limit(limit).offset(offset)
+
+    # Execute with joined data
+    result = await db.execute(
+        query.add_columns(
+            Clip.status.label("clip_status"),
+            Clip.video_preview_url.label("clip_preview_url"),
+            Shoot.name.label("shoot_name"),
+            Shoot.doctors.label("shoot_doctors"),
+        )
+    )
+
+    items = []
+    for row in result:
+        post = row[0]
+        clip_status = row.clip_status
+        clip_preview_url = row.clip_preview_url
+        shoot_name = row.shoot_name
+        shoot_doctors = row.shoot_doctors
+
+        items.append(ContentItem(
+            id=post.id,
+            content_source="branded" if post.source == "webhook" else "official",
+            title=post.title,
+            description=post.description,
+            platform=post.platform,
+            tags=post.tags or [],
+            posted_at=post.posted_at,
+            view_count=post.view_count,
+            like_count=post.like_count,
+            comment_count=post.comment_count,
+            share_count=post.share_count,
+            thumbnail_url=post.thumbnail_url,
+            content_url=post.content_url,
+            content_type=post.content_type,
+            duration_seconds=post.duration_seconds,
+            is_short=post.is_short,
+            clip_id=post.clip_id,
+            status=clip_status.value if clip_status else None,
+            video_preview_url=clip_preview_url,
+            shoot_id=post.shoot_id,
+            shoot_name=shoot_name,
+            doctors=shoot_doctors,
+        ))
+
+    return items
+
+
+@router.post("/tags/refresh")
+async def refresh_post_tags(
+    current_user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    """Manually trigger post tagging for all untagged official posts."""
+    from services.post_tagger import tag_official_posts, propagate_clip_tags_to_posts
+
+    official_stats = await tag_official_posts(db)
+    branded_count = await propagate_clip_tags_to_posts(db)
+    await db.commit()
+
+    return {
+        "official": official_stats,
+        "branded_posts_updated": branded_count,
+    }

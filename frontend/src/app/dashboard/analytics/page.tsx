@@ -4,7 +4,6 @@ import { useState, useEffect } from "react";
 import {
   analyticsApi,
   type AnalyticsSummary,
-  type PostMetrics,
   type ShootMetrics,
   type PlatformStats,
   type TimelineEntry,
@@ -15,15 +14,13 @@ import {
   PlatformChart,
   TimelineChart,
   TrendsChart,
-  PostsTable,
   ShootsGrid,
   FilterBar,
 } from "@/components/analytics";
 
 export default function AnalyticsPage() {
   const [summary, setSummary] = useState<AnalyticsSummary | null>(null);
-  const [topPosts, setTopPosts] = useState<PostMetrics[]>([]);
-  const [allPosts, setAllPosts] = useState<PostMetrics[]>([]);
+
   const [shoots, setShoots] = useState<ShootMetrics[]>([]);
   const [platforms, setPlatforms] = useState<PlatformStats[]>([]);
   const [timeline, setTimeline] = useState<TimelineEntry[]>([]);
@@ -35,7 +32,6 @@ export default function AnalyticsPage() {
   const [selectedPlatform, setSelectedPlatform] = useState<string | null>(null);
   const [dateRange, setDateRange] = useState(30);
   const [sourceFilter, setSourceFilter] = useState<"official" | "branded" | null>(null);
-  const [contentTypeFilter, setContentTypeFilter] = useState<string | null>(null);
 
   useEffect(() => {
     const fetchData = async () => {
@@ -43,19 +39,15 @@ export default function AnalyticsPage() {
       try {
         const sourceParam = sourceFilter || undefined;
         // Fetch all data in parallel
-        const [summaryData, postsData, allPostsData, shootsData, platformsData, timelineData] =
+        const [summaryData, shootsData, platformsData, timelineData] =
           await Promise.all([
             analyticsApi.getSummary({ source: sourceParam }),
-            analyticsApi.getTopPosts({ limit: 10, platform: selectedPlatform || undefined, source: sourceParam }),
-            analyticsApi.getPosts({ source: sourceParam, platform: selectedPlatform || undefined, sort_by: "views", limit: 500 }),
             analyticsApi.getShoots({ sort_by: "views" }),
             analyticsApi.getPlatforms({ source: sourceParam }),
             analyticsApi.getTimeline({ days: dateRange, platform: selectedPlatform || undefined, source: sourceParam }),
           ]);
 
         setSummary(summaryData);
-        setTopPosts(postsData);
-        setAllPosts(allPostsData);
         setShoots(shootsData);
         setPlatforms(platformsData);
         setTimeline(timelineData);
@@ -248,16 +240,22 @@ export default function AnalyticsPage() {
         <TrendsChart series={followerTrends} title="Follower Growth" />
       )}
 
-      {/* All Posts Table */}
-      {allPosts.length > 0 && (
-        <PostsTable
-          posts={allPosts}
-          title={sourceFilter === "official" ? "Official Channel Posts" : sourceFilter === "branded" ? "Branded Account Posts" : "All Posts"}
-          showSource={!sourceFilter}
-          pageSize={15}
-          contentTypeFilter={contentTypeFilter}
-          onContentTypeFilterChange={setContentTypeFilter}
-        />
+      {/* Browse Content Link */}
+      {summary && summary.total_posts > 0 && (
+        <div className="bg-white rounded-lg shadow p-4 flex items-center justify-between">
+          <div>
+            <h3 className="text-sm font-medium text-gray-900">Browse Individual Posts</h3>
+            <p className="text-xs text-gray-500 mt-0.5">
+              Search, filter by tags, and view all {summary.total_posts} posts in the Content Library
+            </p>
+          </div>
+          <a
+            href={sourceFilter ? `/dashboard/content?source=${sourceFilter}` : "/dashboard/content"}
+            className="px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-md hover:bg-blue-700 transition-colors"
+          >
+            Open Content Library
+          </a>
+        </div>
       )}
 
       {/* Shoots Grid - only for branded content */}

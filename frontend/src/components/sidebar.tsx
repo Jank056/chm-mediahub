@@ -10,7 +10,7 @@ const navigation = [
   { name: "Dashboard", href: "/dashboard", roles: ["superadmin", "admin", "editor", "viewer"], requiresClientAccess: false },
   { name: "Clients", href: "/dashboard/clients", roles: ["superadmin", "admin", "editor", "viewer"], requiresClientAccess: true },
   { name: "Analytics", href: "/dashboard/analytics", roles: ["superadmin", "admin", "editor", "viewer"], requiresClientAccess: true },
-  { name: "Clips", href: "/dashboard/clips", roles: ["superadmin", "admin", "editor", "viewer"], requiresClientAccess: true },
+  { name: "Content", href: "/dashboard/content", roles: ["superadmin", "admin", "editor", "viewer"], requiresClientAccess: true },
   { name: "Chatbot", href: "/dashboard/chatbot", roles: ["superadmin", "admin", "editor", "viewer"], requiresClientAccess: false },
   { name: "Reports", href: "/dashboard/reports", roles: ["superadmin", "admin", "editor"], requiresClientAccess: false },
   { name: "Users", href: "/dashboard/users", roles: ["superadmin", "admin"], requiresClientAccess: false },

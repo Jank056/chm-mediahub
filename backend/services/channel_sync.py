@@ -185,6 +185,14 @@ async def sync_youtube_posts(db: Optional[AsyncSession] = None) -> int:
             )
 
         await session.commit()
+
+        # Auto-tag official posts after sync
+        from services.post_tagger import tag_official_posts
+        tag_stats = await tag_official_posts(session)
+        await session.commit()
+        if tag_stats["matched"] > 0:
+            logger.info(f"Post tagging after YouTube sync: {tag_stats}")
+
         logger.info(f"YouTube post sync complete: {len(videos)} videos processed")
         return len(videos)
 
