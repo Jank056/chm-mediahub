@@ -1054,6 +1054,21 @@ async def search_content(
         if not thumbnail and post.platform == "youtube" and post.provider_post_id:
             thumbnail = f"https://i.ytimg.com/vi/{post.provider_post_id}/mqdefault.jpg"
 
+        # Derive content_url for posts missing one (webhook posts lack it)
+        content_url = post.content_url
+        if not content_url and post.provider_post_id:
+            p = post.platform.lower() if post.platform else ""
+            if p == "youtube":
+                content_url = f"https://www.youtube.com/watch?v={post.provider_post_id}"
+            elif p in ("x", "twitter"):
+                content_url = f"https://x.com/i/status/{post.provider_post_id}"
+            elif p == "linkedin":
+                content_url = f"https://www.linkedin.com/feed/update/{post.provider_post_id}"
+            elif p == "facebook":
+                content_url = f"https://www.facebook.com/{post.provider_post_id}"
+            elif p == "instagram":
+                content_url = f"https://www.instagram.com/p/{post.provider_post_id}/"
+
         items.append(ContentItem(
             id=post.id,
             content_source="branded" if post.source == "webhook" else "official",
@@ -1067,7 +1082,7 @@ async def search_content(
             comment_count=post.comment_count,
             share_count=post.share_count,
             thumbnail_url=thumbnail,
-            content_url=post.content_url,
+            content_url=content_url,
             content_type=post.content_type,
             duration_seconds=post.duration_seconds,
             is_short=post.is_short,

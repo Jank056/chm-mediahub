@@ -111,7 +111,7 @@ export default function ContentPage() {
   const initialSource = searchParams.get("source") as "official" | "branded" | null;
   const initialTag = searchParams.get("tag");
 
-  const [source, setSource] = useState<"official" | "branded" | "">(initialSource || "");
+  const [source, setSource] = useState<"official" | "branded" | "">(initialSource || "official");
   const [searchQuery, setSearchQuery] = useState("");
   const [debouncedQuery, setDebouncedQuery] = useState("");
   const [platform, setPlatform] = useState<string>("");
@@ -121,6 +121,7 @@ export default function ContentPage() {
   const [availableTags, setAvailableTags] = useState<Record<string, string[]>>({});
   const [selectedTags, setSelectedTags] = useState<string[]>(initialTag ? [initialTag] : []);
   const [expandedCategory, setExpandedCategory] = useState<string | null>(null);
+  const [openTagRow, setOpenTagRow] = useState<string | null>(null);
 
   // Pagination
   const [offset, setOffset] = useState(0);
@@ -187,6 +188,9 @@ export default function ContentPage() {
       const target = e.target as HTMLElement;
       if (!target.closest("[data-tag-dropdown]")) {
         setExpandedCategory(null);
+      }
+      if (!target.closest("[data-row-tags]")) {
+        setOpenTagRow(null);
       }
     };
     document.addEventListener("click", handleClick);
@@ -467,15 +471,11 @@ export default function ContentPage() {
                     <h3 className="text-sm font-medium text-gray-900 truncate">
                       {item.title || item.description?.slice(0, 80) || "Untitled"}
                     </h3>
-                    <span
-                      className={`shrink-0 px-1.5 py-0.5 text-[10px] font-medium rounded-full ${
-                        item.content_source === "official"
-                          ? "bg-indigo-100 text-indigo-700"
-                          : "bg-emerald-100 text-emerald-700"
-                      }`}
-                    >
-                      {item.content_source === "official" ? "Official" : "Branded"}
-                    </span>
+                    {item.content_source === "branded" && (
+                      <span className="shrink-0 px-1.5 py-0.5 text-[10px] font-medium rounded-full bg-emerald-100 text-emerald-700">
+                        Branded
+                      </span>
+                    )}
                   </div>
                   <div className="flex items-center gap-2 text-xs text-gray-500">
                     <span className={`inline-flex items-center gap-1 ${getPlatformColor(item.platform)}`}>
@@ -492,26 +492,47 @@ export default function ContentPage() {
                 </div>
 
                 {/* Tags (lg+ only) */}
-                <div className="hidden lg:flex items-center gap-1 w-[200px] shrink-0">
+                <div className="hidden lg:flex items-center w-[100px] shrink-0 relative" data-row-tags>
                   {item.tags.length > 0 ? (
                     <>
-                      {item.tags.slice(0, 3).map((tag, i) => {
-                        const { value, color } = getTagDisplay(tag);
-                        return (
-                          <button
-                            key={i}
-                            onClick={() => toggleTag(tag)}
-                            className={`px-1.5 py-0.5 text-[10px] rounded border cursor-pointer hover:opacity-80 truncate max-w-[70px] ${color}`}
-                            title={value}
-                          >
-                            {value}
-                          </button>
-                        );
-                      })}
-                      {item.tags.length > 3 && (
-                        <span className="text-[10px] text-gray-400 shrink-0">
-                          +{item.tags.length - 3}
-                        </span>
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setOpenTagRow(openTagRow === item.id ? null : item.id);
+                        }}
+                        className="inline-flex items-center gap-1 px-2 py-1 text-xs text-gray-600 bg-gray-50 border border-gray-200 rounded-md hover:bg-gray-100 transition-colors"
+                      >
+                        <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A1.994 1.994 0 013 12V7a4 4 0 014-4z" />
+                        </svg>
+                        {item.tags.length} {item.tags.length === 1 ? "tag" : "tags"}
+                      </button>
+                      {openTagRow === item.id && (
+                        <div
+                          data-row-tags
+                          className="absolute top-full right-0 mt-1 z-20 bg-white rounded-lg shadow-lg border border-gray-200 p-2 min-w-[220px] max-h-[250px] overflow-y-auto"
+                        >
+                          <div className="flex flex-wrap gap-1.5">
+                            {item.tags.map((tag) => {
+                              const { category, value, color } = getTagDisplay(tag);
+                              const isSelected = selectedTags.includes(tag);
+                              return (
+                                <button
+                                  key={tag}
+                                  onClick={() => toggleTag(tag)}
+                                  className={`inline-flex items-center gap-1 px-2 py-1 text-xs font-medium rounded-full border cursor-pointer hover:opacity-80 ${color} ${
+                                    isSelected ? "ring-2 ring-blue-400" : ""
+                                  }`}
+                                >
+                                  <span className="opacity-60 text-[10px]">
+                                    {TAG_CATEGORIES[category]?.label || category}:
+                                  </span>
+                                  {value}
+                                </button>
+                              );
+                            })}
+                          </div>
+                        </div>
                       )}
                     </>
                   ) : (
