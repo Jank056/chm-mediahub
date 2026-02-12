@@ -356,6 +356,17 @@ async def tag_official_posts(db: AsyncSession) -> dict:
         for v in tag_vocab.values()
         if v.startswith("doctor:")
     }
+
+    # Also include KOL member names as known doctors (some doctors appear in
+    # KOL groups but have no clips yet, so they're missing from clip tags)
+    kol_names_result = await db.execute(
+        text("SELECT DISTINCT name FROM kols WHERE name IS NOT NULL")
+    )
+    for (name,) in kol_names_result:
+        normalized = normalize_doctor_name(name)
+        if normalized and len(normalized) > 2:
+            known_doctors.add(normalized)
+
     logger.info(f"Tag vocabulary: {len(tag_vocab)} keywords, {len(known_doctors)} doctors")
 
     # Fetch all KOL groups with members
