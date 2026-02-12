@@ -13,10 +13,8 @@ import re
 
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import selectinload
 
 from models.clip import Clip
-from models.kol import KOLGroup, KOLGroupMember
 from models.post import Post
 from models.shoot import Shoot
 from services.shoot_matcher import normalize_doctor_name, extract_surnames_from_group_name
@@ -270,81 +268,64 @@ def scan_text_for_tags(
     return sorted(matched_tags)
 
 
-async def get_tags_for_kol_group(db: AsyncSession, kol_group: KOLGroup) -> list[str]:
-    """Get the union of all tags from clips belonging to this KOL group's shoots.
-
-    Traverses: KOLGroup → shoots → clips → tags
-    Returns a deduplicated, sorted list of tags.
-    """
-    result = await db.execute(
-        select(Clip.tags)
-        .join(Shoot, Clip.shoot_id == Shoot.id)
-        .where(Shoot.kol_group_id == kol_group.id)
-        .where(Clip.tags.isnot(None))
-    )
-
-    all_tags = set()
-    for (tags,) in result:
-        if tags:
-            all_tags.update(tags)
-
-    return sorted(all_tags)
-
-
-async def match_post_to_kol_group(
-    db: AsyncSession,
+def match_post_to_shoot(
     post: Post,
-    kol_groups: list[KOLGroup],
-) -> KOLGroup | None:
-    """Match a post to a KOL group based on doctor names in the title/description.
+    shoots_with_doctors: list[tuple[str, str, set[str]]],
+) -> tuple[str, str] | None:
+    """Match a post to the best-matching shoot based on doctor names.
 
-    Reuses the same surname-matching logic as shoot_matcher.
+    Args:
+        post: The official post to match.
+        shoots_with_doctors: List of (shoot_id, shoot_name, normalized_doctor_surnames).
+
+    Returns:
+        (shoot_id, shoot_name) or None if no match found.
     """
-    # Extract potential doctor names from the post
-    text = f"{post.title or ''} {post.description or ''}"
-    post_surnames = set(extract_doctor_names_from_text(text))
+    post_text = f"{post.title or ''} {post.description or ''}"
+    post_surnames = set(extract_doctor_names_from_text(post_text))
 
     if not post_surnames:
         return None
 
-    best_match: KOLGroup | None = None
+    best_shoot_id: str | None = None
+    best_shoot_name: str | None = None
     best_count = 0
 
-    for group in kol_groups:
-        # Get surnames from group name
-        group_surnames = extract_surnames_from_group_name(group.name)
+    for shoot_id, shoot_name, shoot_surnames in shoots_with_doctors:
+        matches = post_surnames & shoot_surnames
+        match_count = len(matches)
 
-        # Also get from actual KOL members
-        for member in group.members:
-            if member.kol and member.kol.name:
-                normalized = normalize_doctor_name(member.kol.name)
-                if normalized:
-                    group_surnames.add(normalized)
+        if match_count > best_count:
+            best_shoot_id = shoot_id
+            best_shoot_name = shoot_name
+            best_count = match_count
+        elif match_count == best_count and match_count > 0 and best_shoot_id:
+            # Tie-breaker: prefer shoot where post doctors are a subset
+            if post_surnames <= shoot_surnames:
+                best_shoot_id = shoot_id
+                best_shoot_name = shoot_name
 
-        # Count matches
-        matches = post_surnames & group_surnames
-        if len(matches) > best_count:
-            best_match = group
-            best_count = len(matches)
-
-    if best_match:
+    if best_shoot_id:
         logger.debug(
-            f"Post '{post.title}' matched to KOL group '{best_match.name}' "
+            f"Post '{post.title}' matched to shoot '{best_shoot_name}' "
             f"({best_count} name matches)"
         )
+        return best_shoot_id, best_shoot_name
 
-    return best_match
+    return None
 
 
 async def tag_official_posts(db: AsyncSession) -> dict:
     """Tag all untagged official posts using a two-pass approach.
 
-    Pass 1 (KOL group matching): Extract doctor names → match to KOL group →
-    inherit all clip tags from that group's shoots. High-confidence, broad tags.
+    Pass 1 (shoot matching): Extract doctor names from post → match to the
+    specific shoot whose doctors best match → inherit only that shoot's clip tags.
+    This prevents cross-contamination when a KOL group contains multiple shoots
+    with different doctors (e.g., Kang/Bardia group has a Kang shoot AND a
+    Bardia/Callahan shoot — posts should only get the matching shoot's tags).
 
-    Pass 2 (content scan): For posts that didn't match a KOL group (or matched
-    one with no clips), scan title+description for known keywords (drugs, trials,
-    biomarkers, topics, doctor names) and assign tags directly.
+    Pass 2 (content scan): For posts that didn't match a shoot (or matched one
+    with no clips), scan title+description for known keywords and assign directly.
 
     Processes posts where source="direct" and tags IS NULL.
     Returns stats dict with counts.
@@ -357,8 +338,7 @@ async def tag_official_posts(db: AsyncSession) -> dict:
         if v.startswith("doctor:")
     }
 
-    # Also include KOL member names as known doctors (some doctors appear in
-    # KOL groups but have no clips yet, so they're missing from clip tags)
+    # Also include KOL member names as known doctors
     kol_names_result = await db.execute(
         text("SELECT DISTINCT name FROM kols WHERE name IS NOT NULL")
     )
@@ -369,38 +349,41 @@ async def tag_official_posts(db: AsyncSession) -> dict:
 
     logger.info(f"Tag vocabulary: {len(tag_vocab)} keywords, {len(known_doctors)} doctors")
 
-    # Fetch all KOL groups with members
-    groups_result = await db.execute(
-        select(KOLGroup)
-        .options(selectinload(KOLGroup.members).selectinload(KOLGroupMember.kol))
+    # Pre-fetch all shoots with their doctors and clip tags
+    shoots_result = await db.execute(
+        select(Shoot).where(Shoot.doctors.isnot(None))
     )
-    kol_groups = list(groups_result.scalars().all())
+    all_shoots = list(shoots_result.scalars().all())
 
-    # Pre-fetch KOL group → tags mapping.
-    # Duplicate groups with the same name share tags.
-    group_tags_raw: dict[str, list[str]] = {}
-    for group in kol_groups:
-        tags = await get_tags_for_kol_group(db, group)
-        group_tags_raw[group.id] = tags
+    # Build shoot data: (shoot_id, shoot_name, normalized_doctor_surnames)
+    shoots_with_doctors: list[tuple[str, str, set[str]]] = []
+    for shoot in all_shoots:
+        if not shoot.doctors:
+            continue
+        surnames = set()
+        for doc in shoot.doctors:
+            normalized = normalize_doctor_name(doc)
+            if normalized and len(normalized) > 2:
+                surnames.add(normalized)
+        if surnames:
+            shoots_with_doctors.append((shoot.id, shoot.name or "", surnames))
 
-    # Merge tags across groups with identical names
-    name_to_tags: dict[str, set[str]] = {}
-    for group in kol_groups:
-        name_to_tags.setdefault(group.name, set()).update(group_tags_raw[group.id])
-
-    group_tags: dict[str, list[str]] = {}
-    for group in kol_groups:
-        merged = name_to_tags.get(group.name, set())
-        group_tags[group.id] = sorted(merged)
-
-    # Pre-fetch KOL group → first shoot mapping
-    group_shoots: dict[str, str | None] = {}
-    for group in kol_groups:
-        shoot_result = await db.execute(
-            select(Shoot.id).where(Shoot.kol_group_id == group.id).limit(1)
+    # Pre-fetch shoot → tags mapping (only that shoot's clips)
+    shoot_tags: dict[str, list[str]] = {}
+    for shoot_id, _, _ in shoots_with_doctors:
+        result = await db.execute(
+            select(Clip.tags)
+            .where(Clip.shoot_id == shoot_id)
+            .where(Clip.tags.isnot(None))
         )
-        first_shoot = shoot_result.scalar_one_or_none()
-        group_shoots[group.id] = first_shoot
+        all_tags = set()
+        for (tags,) in result:
+            if tags:
+                all_tags.update(tags)
+        shoot_tags[shoot_id] = sorted(all_tags)
+
+    logger.info(f"Loaded {len(shoots_with_doctors)} shoots with doctors, "
+                f"{sum(1 for t in shoot_tags.values() if t)} with clip tags")
 
     # Fetch untagged official posts
     result = await db.execute(
@@ -413,7 +396,7 @@ async def tag_official_posts(db: AsyncSession) -> dict:
 
     stats = {
         "total_untagged": len(untagged_posts),
-        "kol_matched": 0,
+        "shoot_matched": 0,
         "content_scanned": 0,
         "still_empty": 0,
         "tags_applied": 0,
@@ -422,20 +405,21 @@ async def tag_official_posts(db: AsyncSession) -> dict:
     for post in untagged_posts:
         post_text = f"{post.title or ''} {post.description or ''}"
 
-        # Pass 1: Try KOL group matching
-        matched_group = await match_post_to_kol_group(db, post, kol_groups) if kol_groups else None
+        # Pass 1: Match post to a specific shoot by doctor names
+        shoot_match = match_post_to_shoot(post, shoots_with_doctors)
 
-        if matched_group:
-            kol_tags = group_tags.get(matched_group.id, [])
-            if kol_tags:
-                post.tags = kol_tags
+        if shoot_match:
+            matched_shoot_id, matched_shoot_name = shoot_match
+            tags = shoot_tags.get(matched_shoot_id, [])
+            if tags:
+                post.tags = tags
                 if not post.shoot_id:
-                    post.shoot_id = group_shoots.get(matched_group.id)
-                stats["kol_matched"] += 1
-                stats["tags_applied"] += len(kol_tags)
+                    post.shoot_id = matched_shoot_id
+                stats["shoot_matched"] += 1
+                stats["tags_applied"] += len(tags)
                 logger.info(
-                    f"[KOL] '{post.title or '(no title)'}' → '{matched_group.name}' "
-                    f"({len(kol_tags)} tags)"
+                    f"[SHOOT] '{post.title or '(no title)'}' → '{matched_shoot_name}' "
+                    f"({len(tags)} tags)"
                 )
                 continue
 
@@ -444,8 +428,8 @@ async def tag_official_posts(db: AsyncSession) -> dict:
 
         if scanned_tags:
             post.tags = scanned_tags
-            if matched_group and not post.shoot_id:
-                post.shoot_id = group_shoots.get(matched_group.id)
+            if shoot_match and not post.shoot_id:
+                post.shoot_id = shoot_match[0]
             stats["content_scanned"] += 1
             stats["tags_applied"] += len(scanned_tags)
             logger.info(
@@ -458,7 +442,7 @@ async def tag_official_posts(db: AsyncSession) -> dict:
     await db.flush()
 
     logger.info(
-        f"Post tagging complete: {stats['kol_matched']} KOL-matched, "
+        f"Post tagging complete: {stats['shoot_matched']} shoot-matched, "
         f"{stats['content_scanned']} content-scanned, "
         f"{stats['still_empty']} empty out of {stats['total_untagged']} total"
     )
