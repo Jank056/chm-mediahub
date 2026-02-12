@@ -465,11 +465,6 @@ export default function ContentPage() {
                   {item.posted_at && (
                     <span>{formatDate(item.posted_at)}</span>
                   )}
-                  {item.shoot_name && (
-                    <span className="text-gray-400" title={`Shoot: ${item.shoot_name}`}>
-                      {item.shoot_name}
-                    </span>
-                  )}
                 </div>
 
                 {/* Tags */}

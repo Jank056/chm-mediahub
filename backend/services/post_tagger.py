@@ -36,14 +36,15 @@ def extract_doctor_names_from_text(text: str) -> list[str]:
 
     surnames = set()
 
-    # Pattern 1: "Dr. Firstname Lastname" or "Dr. Surname"
-    # Capture 1-2 name-like words after "Dr." and add each as a potential surname.
-    # The KOL group matching step filters out non-name words (e.g. "Discuss").
-    # Name-word: "Bardia", "O'Shaughnessey", "O'Dea", etc.
+    # Name-word pattern: handles "Bardia", "O'Shaughnessey", "O'Dea"
     _NW = r"[A-Z][a-z]*(?:['\u2019][A-Za-z]+)+"  # O'Shaughnessey
     _NW2 = r"[A-Z][a-z]+"  # Standard names like Bardia
     _NW_FULL = rf"(?:{_NW}|{_NW2})"
-    for m in re.finditer(rf"Dr\.?\s+({_NW_FULL})(?:\s+({_NW_FULL}))?", text):
+
+    # Pattern 1: "Dr. Firstname Lastname" or "Dr. Surname"
+    # Also handles "Dr. VK Gadi" (initials + surname)
+    # Captures 1-2 name-like words; KOL matching filters out non-names.
+    for m in re.finditer(rf"Dr\.?\s+(?:[A-Z]{{1,3}}\s+)?({_NW_FULL})(?:\s+({_NW_FULL}))?", text):
         for g in [m.group(1), m.group(2)]:
             if not g:
                 continue
@@ -51,7 +52,23 @@ def extract_doctor_names_from_text(text: str) -> list[str]:
             if normalized and len(normalized) > 2:
                 surnames.add(normalized)
 
-    # Pattern 2: Slash-separated names (common in CHM titles like "Mouabbi/Rimawi")
+    # Pattern 2: "Drs. Name1, Name2, & Name3" (plural doctors)
+    for m in re.finditer(r"Drs\.?\s+(.+?)(?:\s*[-\u2013\u2014]|\s*$)", text):
+        # Split on commas, &, and "and"
+        parts = re.split(r"[,&]|\band\b", m.group(1))
+        for part in parts:
+            part = part.strip()
+            if not part:
+                continue
+            # Find all name-words and take the last as surname
+            name_words = re.findall(rf"{_NW_FULL}", part)
+            if name_words:
+                surname = name_words[-1]
+                normalized = normalize_doctor_name(surname)
+                if normalized and len(normalized) > 2:
+                    surnames.add(normalized)
+
+    # Pattern 3: Slash-separated names (common in CHM titles like "Mouabbi/Rimawi")
     slash_groups = re.findall(r"(\w+(?:/\w+)+)", text)
     for group in slash_groups:
         for part in group.split("/"):
@@ -59,11 +76,9 @@ def extract_doctor_names_from_text(text: str) -> list[str]:
             if normalized and len(normalized) > 2:
                 surnames.add(normalized)
 
-    # Pattern 3: "featuring Hamilton" or "with Mouabbi" (without "Dr." prefix)
-    # Cases with "Dr." are already handled by Pattern 1.
+    # Pattern 4: "featuring Hamilton" or "with Mouabbi" (without "Dr." prefix)
     for m in re.finditer(r"(?:with|featuring|ft\.?)\s+([A-Z][a-z'\u2019]+)", text):
         word = m.group(1)
-        # Skip if preceded by "Dr." (already handled)
         prefix = text[:m.start()]
         if re.search(r"Dr\.?\s*$", prefix):
             continue
@@ -159,11 +174,23 @@ async def tag_official_posts(db: AsyncSession) -> dict:
         logger.info("No KOL groups found, skipping post tagging")
         return {"total_untagged": 0, "matched": 0, "unmatched": 0}
 
-    # Pre-fetch KOL group → tags mapping
-    group_tags: dict[str, list[str]] = {}
+    # Pre-fetch KOL group → tags mapping.
+    # Duplicate groups with the same name share tags (e.g., two "Iyengar/Dietrich"
+    # groups where only one has clips with tags).
+    group_tags_raw: dict[str, list[str]] = {}
     for group in kol_groups:
         tags = await get_tags_for_kol_group(db, group)
-        group_tags[group.id] = tags
+        group_tags_raw[group.id] = tags
+
+    # Merge tags across groups with identical names
+    name_to_tags: dict[str, set[str]] = {}
+    for group in kol_groups:
+        name_to_tags.setdefault(group.name, set()).update(group_tags_raw[group.id])
+
+    group_tags: dict[str, list[str]] = {}
+    for group in kol_groups:
+        merged = name_to_tags.get(group.name, set())
+        group_tags[group.id] = sorted(merged)
 
     # Pre-fetch KOL group → first shoot mapping (for setting post.shoot_id)
     group_shoots: dict[str, str | None] = {}
