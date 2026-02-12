@@ -1049,6 +1049,11 @@ async def search_content(
         shoot_name = row.shoot_name
         shoot_doctors = row.shoot_doctors
 
+        # Derive YouTube thumbnail for posts missing one
+        thumbnail = post.thumbnail_url
+        if not thumbnail and post.platform == "youtube" and post.provider_post_id:
+            thumbnail = f"https://i.ytimg.com/vi/{post.provider_post_id}/mqdefault.jpg"
+
         items.append(ContentItem(
             id=post.id,
             content_source="branded" if post.source == "webhook" else "official",
@@ -1061,7 +1066,7 @@ async def search_content(
             like_count=post.like_count,
             comment_count=post.comment_count,
             share_count=post.share_count,
-            thumbnail_url=post.thumbnail_url,
+            thumbnail_url=thumbnail,
             content_url=post.content_url,
             content_type=post.content_type,
             duration_seconds=post.duration_seconds,

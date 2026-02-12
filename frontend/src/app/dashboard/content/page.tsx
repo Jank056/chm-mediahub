@@ -402,50 +402,73 @@ export default function ContentPage() {
         </div>
       )}
 
-      {/* Content Grid */}
+      {/* Content List */}
       {!isLoading && content.length > 0 && (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          {content.map((item) => (
-            <div
-              key={item.id}
-              className="bg-white rounded-lg shadow overflow-hidden hover:shadow-md transition-shadow"
-            >
-              {/* Thumbnail */}
-              {item.thumbnail_url && (
-                <a
-                  href={item.content_url || "#"}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="block relative"
-                >
-                  <img
-                    src={item.thumbnail_url}
-                    alt={item.title || ""}
-                    className="w-full h-40 object-cover"
-                  />
-                  {item.duration_seconds && (
-                    <span className="absolute bottom-2 right-2 bg-black/80 text-white text-xs px-1.5 py-0.5 rounded">
-                      {Math.floor(item.duration_seconds / 60)}:{(item.duration_seconds % 60).toString().padStart(2, "0")}
-                    </span>
+        <div className="bg-white rounded-lg shadow divide-y divide-gray-100">
+          {content.map((item) => {
+            const platformBg: Record<string, string> = {
+              youtube: "bg-red-100",
+              linkedin: "bg-blue-100",
+              x: "bg-gray-200",
+              twitter: "bg-gray-200",
+              facebook: "bg-blue-100",
+              instagram: "bg-pink-100",
+            };
+            const platformTextColor: Record<string, string> = {
+              youtube: "text-red-300",
+              linkedin: "text-blue-300",
+              x: "text-gray-400",
+              twitter: "text-gray-400",
+              facebook: "text-blue-300",
+              instagram: "text-pink-300",
+            };
+            return (
+              <div
+                key={item.id}
+                className="flex items-center gap-4 px-4 py-3 hover:bg-gray-50 transition-colors"
+              >
+                {/* Thumbnail */}
+                <div className="shrink-0 w-[120px] h-[68px] rounded overflow-hidden bg-gray-100">
+                  {item.thumbnail_url ? (
+                    <a
+                      href={item.content_url || "#"}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="block relative w-full h-full"
+                    >
+                      <img
+                        src={item.thumbnail_url}
+                        alt={item.title || ""}
+                        className="w-full h-full object-cover"
+                      />
+                      {item.duration_seconds != null && (
+                        <span className="absolute bottom-1 right-1 bg-black/80 text-white text-[10px] px-1 py-0.5 rounded leading-none">
+                          {Math.floor(item.duration_seconds / 60)}:{(item.duration_seconds % 60).toString().padStart(2, "0")}
+                        </span>
+                      )}
+                      {item.is_short && (
+                        <span className="absolute top-1 left-1 bg-red-600 text-white text-[10px] px-1 py-0.5 rounded leading-none font-medium">
+                          Short
+                        </span>
+                      )}
+                    </a>
+                  ) : (
+                    <div className={`w-full h-full flex items-center justify-center ${platformBg[item.platform.toLowerCase()] || "bg-gray-100"}`}>
+                      <span className={`opacity-40 ${platformTextColor[item.platform.toLowerCase()] || "text-gray-400"}`}>
+                        {getPlatformIcon(item.platform)}
+                      </span>
+                    </div>
                   )}
-                  {item.is_short && (
-                    <span className="absolute top-2 left-2 bg-red-600 text-white text-xs px-1.5 py-0.5 rounded font-medium">
-                      Short
-                    </span>
-                  )}
-                </a>
-              )}
+                </div>
 
-              <div className="p-4">
-                {/* Title + badges */}
-                <div className="flex items-start justify-between mb-2">
-                  <h3 className="font-medium text-gray-900 line-clamp-2 flex-1 text-sm">
-                    {item.title || item.description?.slice(0, 80) || "Untitled"}
-                  </h3>
-                  <div className="flex items-center gap-1.5 ml-2 shrink-0">
-                    {/* Source badge */}
+                {/* Title + meta */}
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2 mb-1">
+                    <h3 className="text-sm font-medium text-gray-900 truncate">
+                      {item.title || item.description?.slice(0, 80) || "Untitled"}
+                    </h3>
                     <span
-                      className={`px-2 py-0.5 text-xs font-medium rounded-full ${
+                      className={`shrink-0 px-1.5 py-0.5 text-[10px] font-medium rounded-full ${
                         item.content_source === "official"
                           ? "bg-indigo-100 text-indigo-700"
                           : "bg-emerald-100 text-emerald-700"
@@ -454,44 +477,50 @@ export default function ContentPage() {
                       {item.content_source === "official" ? "Official" : "Branded"}
                     </span>
                   </div>
+                  <div className="flex items-center gap-2 text-xs text-gray-500">
+                    <span className={`inline-flex items-center gap-1 ${getPlatformColor(item.platform)}`}>
+                      {getPlatformIcon(item.platform)}
+                      <span className="capitalize">{item.platform}</span>
+                    </span>
+                    {item.posted_at && (
+                      <>
+                        <span className="text-gray-300">|</span>
+                        <span>{formatDate(item.posted_at)}</span>
+                      </>
+                    )}
+                  </div>
                 </div>
 
-                {/* Platform + date */}
-                <div className="flex items-center gap-3 mb-3 text-xs text-gray-500">
-                  <span className={`inline-flex items-center gap-1 ${getPlatformColor(item.platform)}`}>
-                    {getPlatformIcon(item.platform)}
-                    <span className="capitalize">{item.platform}</span>
-                  </span>
-                  {item.posted_at && (
-                    <span>{formatDate(item.posted_at)}</span>
+                {/* Tags (lg+ only) */}
+                <div className="hidden lg:flex items-center gap-1 w-[200px] shrink-0">
+                  {item.tags.length > 0 ? (
+                    <>
+                      {item.tags.slice(0, 3).map((tag, i) => {
+                        const { value, color } = getTagDisplay(tag);
+                        return (
+                          <button
+                            key={i}
+                            onClick={() => toggleTag(tag)}
+                            className={`px-1.5 py-0.5 text-[10px] rounded border cursor-pointer hover:opacity-80 truncate max-w-[70px] ${color}`}
+                            title={value}
+                          >
+                            {value}
+                          </button>
+                        );
+                      })}
+                      {item.tags.length > 3 && (
+                        <span className="text-[10px] text-gray-400 shrink-0">
+                          +{item.tags.length - 3}
+                        </span>
+                      )}
+                    </>
+                  ) : (
+                    <span className="text-[10px] text-gray-300">No tags</span>
                   )}
                 </div>
 
-                {/* Tags */}
-                {item.tags.length > 0 && (
-                  <div className="flex flex-wrap gap-1 mb-3">
-                    {item.tags.slice(0, 4).map((tag, i) => {
-                      const { value, color } = getTagDisplay(tag);
-                      return (
-                        <button
-                          key={i}
-                          onClick={() => toggleTag(tag)}
-                          className={`px-2 py-0.5 text-xs rounded border cursor-pointer hover:opacity-80 ${color}`}
-                        >
-                          {value}
-                        </button>
-                      );
-                    })}
-                    {item.tags.length > 4 && (
-                      <span className="px-2 py-0.5 text-xs text-gray-400">
-                        +{item.tags.length - 4} more
-                      </span>
-                    )}
-                  </div>
-                )}
-
-                {/* Metrics */}
-                <div className="flex items-center gap-4 text-xs text-gray-500 border-t pt-3">
+                {/* Metrics (md+ only) */}
+                <div className="hidden md:flex items-center gap-3 w-[180px] shrink-0 text-xs text-gray-500">
                   <span title="Views" className="inline-flex items-center gap-1">
                     <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
@@ -511,23 +540,27 @@ export default function ContentPage() {
                     </svg>
                     {formatNumber(item.comment_count)}
                   </span>
-                  {item.content_url && (
-                    <a
-                      href={item.content_url}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="ml-auto text-blue-600 hover:text-blue-800 inline-flex items-center gap-1"
-                    >
-                      View
-                      <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
-                      </svg>
-                    </a>
-                  )}
                 </div>
+
+                {/* View link */}
+                {item.content_url ? (
+                  <a
+                    href={item.content_url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="shrink-0 p-1.5 text-gray-400 hover:text-blue-600 transition-colors"
+                    title="Open in platform"
+                  >
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+                    </svg>
+                  </a>
+                ) : (
+                  <div className="shrink-0 w-7" />
+                )}
               </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       )}
 
