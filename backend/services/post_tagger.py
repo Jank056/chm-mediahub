@@ -1,14 +1,17 @@
-"""Post tagger — assigns tags to official posts by matching doctor names to KOL groups.
+"""Post tagger — assigns tags to official posts.
 
-Official channel posts (source="direct") arrive without tags. This service extracts
-doctor names from post titles/descriptions, matches them to KOL groups, and inherits
-the tags from clips belonging to those groups' shoots.
+Two-pass approach:
+1. KOL group matching: extract doctor names → match to KOL group → inherit clip tags
+2. Content scan: scan title+description for known keywords → assign tags directly
+
+This ensures every post gets tagged, even those without doctor names in the title
+or whose KOL group has no clips synced yet.
 """
 
 import logging
 import re
 
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -19,6 +22,22 @@ from models.shoot import Shoot
 from services.shoot_matcher import normalize_doctor_name, extract_surnames_from_group_name
 
 logger = logging.getLogger(__name__)
+
+# X/Twitter handle → doctor surname mapping
+X_HANDLE_TO_DOCTOR: dict[str, str] = {
+    "dradityabardia": "bardia",
+    "irenekangmd": "kang",
+    "drvkgadi": "gadi",
+    "jamouabbi": "mouabbi",
+    "cairomichelina": "cairo",
+    "mfrimawi": "rimawi",
+    "drbirhiray": "birhiray",
+    "drneiliyengar": "iyengar",
+    "neiliyengar": "iyengar",
+    "erikahamiltonmd": "hamilton",
+    "drhamilton": "hamilton",
+    "markrobsonmd": "robson",
+}
 
 
 def extract_doctor_names_from_text(text: str) -> list[str]:
@@ -89,6 +108,168 @@ def extract_doctor_names_from_text(text: str) -> list[str]:
     return list(surnames)
 
 
+async def build_tag_vocabulary(db: AsyncSession) -> dict[str, str]:
+    """Build a vocabulary of searchable keywords from existing clip tags.
+
+    Queries all unique tags from clips and builds a lookup from
+    lowercase keyword → full tag string (e.g., "her2+" → "biomarker:HER2+").
+    """
+    result = await db.execute(
+        text("""
+            SELECT DISTINCT unnest(tags) AS tag
+            FROM clips WHERE tags IS NOT NULL AND array_length(tags, 1) > 0
+        """)
+    )
+    all_tags = [row[0] for row in result]
+
+    # Build lookup: lowercase keyword → full tag string
+    vocab: dict[str, str] = {}
+    for tag in all_tags:
+        if ":" not in tag:
+            continue
+        category, value = tag.split(":", 1)
+        value_lower = value.lower().strip()
+        # Skip very short or generic values
+        if len(value_lower) < 3:
+            continue
+        vocab[value_lower] = tag
+
+    return vocab
+
+
+def scan_text_for_tags(
+    text_content: str,
+    tag_vocab: dict[str, str],
+    known_doctors: set[str],
+) -> list[str]:
+    """Scan text for known keywords and return matching tags.
+
+    Searches title+description for drug names, trial identifiers, biomarkers,
+    topics, and doctor names. Uses word-boundary matching to avoid false positives.
+    """
+    if not text_content:
+        return []
+
+    text_lower = text_content.lower()
+    matched_tags = set()
+
+    # Scan for each known keyword in the vocabulary
+    for keyword, tag in tag_vocab.items():
+        category = tag.split(":")[0]
+
+        # Skip doctor tags here — handled separately with name extraction
+        if category == "doctor":
+            continue
+
+        # Build appropriate regex pattern based on category
+        if category == "trial":
+            # Trial names: match "DB09", "DESTINY-Breast04", "CLEOPATRA", etc.
+            # Also match expanded forms like "DESTINY-Breast04" for "DB04"
+            escaped = re.escape(keyword)
+            if re.search(rf'\b{escaped}\b', text_lower):
+                matched_tags.add(tag)
+                continue
+            # Also check common expansions: "DB09" → "DESTINY-Breast09"
+            db_match = re.match(r'^db(\d+)$', keyword)
+            if db_match:
+                num = db_match.group(1)
+                if re.search(rf'destiny[- ]?breast[- ]?0?{num}\b', text_lower):
+                    matched_tags.add(tag)
+        elif category == "drug":
+            # Drug names: match with word boundaries
+            escaped = re.escape(keyword)
+            # T-DXd variants: "trastuzumab deruxtecan", "T-DXd"
+            if keyword in ("t-dxd", "t-dxd"):
+                if re.search(r'\bt[- ]?dxd\b|trastuzumab\s+deruxtecan', text_lower):
+                    matched_tags.add(tag)
+            elif keyword == "enhertu":
+                if re.search(r'\benhertu\b|trastuzumab\s+deruxtecan', text_lower):
+                    matched_tags.add(tag)
+            elif keyword == "t-dm1":
+                if re.search(r'\bt[- ]?dm1\b|ado[- ]trastuzumab', text_lower):
+                    matched_tags.add(tag)
+            elif keyword == "trodelvy":
+                if re.search(r'\btrodelvy\b|sacituzumab\s+govitecan', text_lower):
+                    matched_tags.add(tag)
+            elif keyword == "dato-dxd":
+                if re.search(r'\bdato[- ]?dxd\b|datopotamab', text_lower):
+                    matched_tags.add(tag)
+            elif keyword == "thp":
+                # THP regimen — require context to avoid false positives
+                if re.search(r'\bthp\b', text_lower):
+                    matched_tags.add(tag)
+            else:
+                if re.search(rf'\b{escaped}\b', text_lower):
+                    matched_tags.add(tag)
+        elif category == "biomarker":
+            # Biomarkers: handle HER2 variants carefully
+            kw = keyword
+            if kw in ("her2+", "her2-positive"):
+                if re.search(r'her2[- ]?(?:positive|\+)', text_lower):
+                    matched_tags.add(tag)
+            elif kw in ("her2-low", "her2 low"):
+                if re.search(r'her2[- ]?low\b', text_lower):
+                    matched_tags.add(tag)
+            elif kw in ("her2-ultralow", "her2 ultralow", "her2-low / ultra-low"):
+                if re.search(r'her2[- ]?(?:ultra[- ]?low|low\s*/\s*ultra)', text_lower):
+                    matched_tags.add(tag)
+            elif kw in ("tnbc", "triple negative"):
+                if re.search(r'\btnbc\b|triple[- ]negative', text_lower):
+                    matched_tags.add(tag)
+            elif kw == "hr+":
+                if re.search(r'\bhr[- ]?(?:positive|\+)', text_lower):
+                    matched_tags.add(tag)
+            elif kw == "pik3ca":
+                if re.search(r'\bpik3ca\b', text_lower):
+                    matched_tags.add(tag)
+            elif kw.startswith("high-risk"):
+                if re.search(r'high[- ]risk|cns\s+metast|brain\s+met', text_lower):
+                    matched_tags.add(tag)
+            else:
+                escaped = re.escape(kw)
+                if re.search(rf'\b{escaped}\b', text_lower):
+                    matched_tags.add(tag)
+        elif category == "topic":
+            escaped = re.escape(keyword)
+            if re.search(rf'\b{escaped}\b', text_lower):
+                matched_tags.add(tag)
+        elif category == "stage":
+            kw = keyword.lower()
+            if kw == "ebc":
+                if re.search(r'\bebc\b|early[- ]?stage|early breast cancer|(?<!\bneo)adjuvant', text_lower):
+                    matched_tags.add(tag)
+            elif kw == "mbc":
+                if re.search(r'\bmbc\b|metastatic breast cancer|metastatic\s+disease', text_lower):
+                    matched_tags.add(tag)
+        elif category == "brand":
+            escaped = re.escape(keyword)
+            if re.search(rf'\b{escaped}\b', text_lower):
+                matched_tags.add(tag)
+
+    # Scan for doctor names (using name extractor + known doctors set)
+    extracted_surnames = set(extract_doctor_names_from_text(text_content))
+
+    # Also extract from X/Twitter handles
+    for handle_match in re.finditer(r'@(\w+)', text_lower):
+        handle = handle_match.group(1).lower()
+        if handle in X_HANDLE_TO_DOCTOR:
+            extracted_surnames.add(X_HANDLE_TO_DOCTOR[handle])
+
+    # Match extracted surnames against known doctors
+    for surname in extracted_surnames:
+        if surname in known_doctors:
+            # Use the casing from the tag vocabulary
+            for tag in tag_vocab.values():
+                if tag.startswith("doctor:") and tag.split(":", 1)[1].lower() == surname:
+                    matched_tags.add(tag)
+                    break
+            else:
+                # Capitalize first letter for new doctor tags
+                matched_tags.add(f"doctor:{surname.capitalize()}")
+
+    return sorted(matched_tags)
+
+
 async def get_tags_for_kol_group(db: AsyncSession, kol_group: KOLGroup) -> list[str]:
     """Get the union of all tags from clips belonging to this KOL group's shoots.
 
@@ -156,13 +337,27 @@ async def match_post_to_kol_group(
 
 
 async def tag_official_posts(db: AsyncSession) -> dict:
-    """Tag all untagged official posts.
+    """Tag all untagged official posts using a two-pass approach.
+
+    Pass 1 (KOL group matching): Extract doctor names → match to KOL group →
+    inherit all clip tags from that group's shoots. High-confidence, broad tags.
+
+    Pass 2 (content scan): For posts that didn't match a KOL group (or matched
+    one with no clips), scan title+description for known keywords (drugs, trials,
+    biomarkers, topics, doctor names) and assign tags directly.
 
     Processes posts where source="direct" and tags IS NULL.
-    Posts that don't match any KOL group get tags=[] so they aren't re-processed.
-
     Returns stats dict with counts.
     """
+    # Build tag vocabulary from existing clip tags
+    tag_vocab = await build_tag_vocabulary(db)
+    known_doctors = {
+        v.split(":", 1)[1].lower()
+        for v in tag_vocab.values()
+        if v.startswith("doctor:")
+    }
+    logger.info(f"Tag vocabulary: {len(tag_vocab)} keywords, {len(known_doctors)} doctors")
+
     # Fetch all KOL groups with members
     groups_result = await db.execute(
         select(KOLGroup)
@@ -170,13 +365,8 @@ async def tag_official_posts(db: AsyncSession) -> dict:
     )
     kol_groups = list(groups_result.scalars().all())
 
-    if not kol_groups:
-        logger.info("No KOL groups found, skipping post tagging")
-        return {"total_untagged": 0, "matched": 0, "unmatched": 0}
-
     # Pre-fetch KOL group → tags mapping.
-    # Duplicate groups with the same name share tags (e.g., two "Iyengar/Dietrich"
-    # groups where only one has clips with tags).
+    # Duplicate groups with the same name share tags.
     group_tags_raw: dict[str, list[str]] = {}
     for group in kol_groups:
         tags = await get_tags_for_kol_group(db, group)
@@ -192,7 +382,7 @@ async def tag_official_posts(db: AsyncSession) -> dict:
         merged = name_to_tags.get(group.name, set())
         group_tags[group.id] = sorted(merged)
 
-    # Pre-fetch KOL group → first shoot mapping (for setting post.shoot_id)
+    # Pre-fetch KOL group → first shoot mapping
     group_shoots: dict[str, str | None] = {}
     for group in kol_groups:
         shoot_result = await db.execute(
@@ -212,35 +402,54 @@ async def tag_official_posts(db: AsyncSession) -> dict:
 
     stats = {
         "total_untagged": len(untagged_posts),
-        "matched": 0,
-        "unmatched": 0,
+        "kol_matched": 0,
+        "content_scanned": 0,
+        "still_empty": 0,
         "tags_applied": 0,
     }
 
     for post in untagged_posts:
-        matched_group = await match_post_to_kol_group(db, post, kol_groups)
+        post_text = f"{post.title or ''} {post.description or ''}"
+
+        # Pass 1: Try KOL group matching
+        matched_group = await match_post_to_kol_group(db, post, kol_groups) if kol_groups else None
 
         if matched_group:
-            tags = group_tags.get(matched_group.id, [])
-            post.tags = tags
-            # Link to shoot if not already linked
-            if not post.shoot_id:
+            kol_tags = group_tags.get(matched_group.id, [])
+            if kol_tags:
+                post.tags = kol_tags
+                if not post.shoot_id:
+                    post.shoot_id = group_shoots.get(matched_group.id)
+                stats["kol_matched"] += 1
+                stats["tags_applied"] += len(kol_tags)
+                logger.info(
+                    f"[KOL] '{post.title or '(no title)'}' → '{matched_group.name}' "
+                    f"({len(kol_tags)} tags)"
+                )
+                continue
+
+        # Pass 2: Content-based keyword scanning
+        scanned_tags = scan_text_for_tags(post_text, tag_vocab, known_doctors)
+
+        if scanned_tags:
+            post.tags = scanned_tags
+            if matched_group and not post.shoot_id:
                 post.shoot_id = group_shoots.get(matched_group.id)
-            stats["matched"] += 1
-            stats["tags_applied"] += len(tags)
+            stats["content_scanned"] += 1
+            stats["tags_applied"] += len(scanned_tags)
             logger.info(
-                f"Tagged post '{post.title}' → group '{matched_group.name}' "
-                f"({len(tags)} tags)"
+                f"[SCAN] '{post.title or '(no title)'}' → {len(scanned_tags)} tags"
             )
         else:
-            post.tags = []  # Mark as processed (won't re-process)
-            stats["unmatched"] += 1
+            post.tags = []  # Mark as processed
+            stats["still_empty"] += 1
 
     await db.flush()
 
     logger.info(
-        f"Post tagging complete: {stats['matched']} matched, "
-        f"{stats['unmatched']} unmatched out of {stats['total_untagged']} total"
+        f"Post tagging complete: {stats['kol_matched']} KOL-matched, "
+        f"{stats['content_scanned']} content-scanned, "
+        f"{stats['still_empty']} empty out of {stats['total_untagged']} total"
     )
 
     return stats
