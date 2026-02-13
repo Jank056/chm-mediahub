@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import Image from "next/image";
 import Link from "next/link";
 import { useAuthStore } from "@/lib/auth-store";
+import { authApi } from "@/lib/api";
 
 export default function LoginPage() {
   const router = useRouter();
@@ -14,6 +15,11 @@ export default function LoginPage() {
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [isLoading, setIsLoading] = useState(false);
+
+  const [showForgotPassword, setShowForgotPassword] = useState(false);
+  const [forgotEmail, setForgotEmail] = useState("");
+  const [forgotSuccess, setForgotSuccess] = useState(false);
+  const [forgotLoading, setForgotLoading] = useState(false);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -29,6 +35,21 @@ export default function LoginPage() {
       setError(detail || "Login failed");
     } finally {
       setIsLoading(false);
+    }
+  };
+
+  const handleForgotPassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError("");
+    setForgotLoading(true);
+
+    try {
+      await authApi.recoverPassword(forgotEmail);
+      setForgotSuccess(true);
+    } catch {
+      setError("Failed to send reset email. Please try again.");
+    } finally {
+      setForgotLoading(false);
     }
   };
 
@@ -100,6 +121,64 @@ export default function LoginPage() {
               {isLoading ? "Signing in..." : "Sign in"}
             </button>
           </form>
+
+          <div>
+            {!showForgotPassword ? (
+              <button
+                type="button"
+                onClick={() => setShowForgotPassword(true)}
+                className="text-sm text-blue-600 hover:text-blue-700"
+              >
+                Forgot password?
+              </button>
+            ) : (
+              <div className="p-4 bg-gray-50 rounded border border-gray-200">
+                <h3 className="font-medium text-gray-900 mb-2">
+                  Reset Password
+                </h3>
+                {forgotSuccess ? (
+                  <div className="text-sm text-green-700 bg-green-50 p-3 rounded">
+                    If an account with this email exists, a password reset link
+                    has been sent. Check your email.
+                  </div>
+                ) : (
+                  <form
+                    onSubmit={handleForgotPassword}
+                    className="space-y-3"
+                  >
+                    <input
+                      type="email"
+                      value={forgotEmail}
+                      onChange={(e) => setForgotEmail(e.target.value)}
+                      placeholder="Enter your email"
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      required
+                    />
+                    <div className="flex gap-2">
+                      <button
+                        type="submit"
+                        disabled={forgotLoading}
+                        className="flex-1 px-3 py-2 bg-blue-600 text-white text-sm rounded-md hover:bg-blue-700 disabled:opacity-50"
+                      >
+                        {forgotLoading ? "Sending..." : "Send Reset Link"}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setShowForgotPassword(false);
+                          setForgotEmail("");
+                          setForgotSuccess(false);
+                        }}
+                        className="px-3 py-2 bg-gray-200 text-gray-700 text-sm rounded-md hover:bg-gray-300"
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  </form>
+                )}
+              </div>
+            )}
+          </div>
         </div>
 
         <p className="text-center text-sm text-gray-600">

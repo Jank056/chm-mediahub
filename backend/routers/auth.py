@@ -5,6 +5,7 @@ import secrets
 from datetime import datetime
 from typing import Annotated
 
+import httpx
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import RedirectResponse
 from pydantic import BaseModel, EmailStr
@@ -68,6 +69,19 @@ class SignupRequest(BaseModel):
     email: EmailStr
     password: str
     recaptcha_token: str = ""
+
+
+class VerifyEmailRequest(BaseModel):
+    token: str
+
+
+class RecoverPasswordRequest(BaseModel):
+    email: EmailStr
+
+
+class ResetPasswordRequest(BaseModel):
+    token: str
+    new_password: str
 
 
 class UserResponse(BaseModel):
@@ -344,6 +358,152 @@ async def signup(
         token_type=tokens.token_type,
         password_warnings=password_warnings,
     )
+
+
+@router.post("/verify-email", response_model=TokenPair)
+@limiter.limit("10/minute")
+async def verify_email_confirmation(
+    request: Request,
+    data: VerifyEmailRequest,
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    """Verify email confirmation token from GoTrue signup email."""
+    async with httpx.AsyncClient() as client:
+        response = await client.post(
+            f"{settings.gotrue_external_url}/verify",
+            json={"type": "signup", "token": data.token},
+        )
+
+    if not response.is_success:
+        error_detail = "Invalid or expired confirmation link."
+        try:
+            error_body = response.json()
+            if "already confirmed" in str(error_body).lower():
+                error_detail = "This email is already confirmed. Please log in."
+        except Exception:
+            pass
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=error_detail)
+
+    gotrue_data = response.json()
+    email = gotrue_data.get("user", {}).get("email")
+    if not email:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Could not determine email from confirmation token.",
+        )
+
+    result = await db.execute(select(User).where(User.email == email))
+    user = result.scalar_one_or_none()
+
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Account not found. Please contact support.",
+        )
+
+    if not user.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Account is deactivated.",
+        )
+
+    return AuthService.create_token_pair(user.id, user.email, user.role.value)
+
+
+@router.post("/recover", response_model=MessageResponse)
+@limiter.limit("3/minute")
+async def request_password_recovery(
+    request: Request,
+    data: RecoverPasswordRequest,
+):
+    """Send password recovery email via GoTrue. Always returns success to prevent email enumeration."""
+    try:
+        async with httpx.AsyncClient() as client:
+            await client.post(
+                f"{settings.gotrue_external_url}/recover",
+                json={"email": data.email},
+            )
+    except Exception:
+        pass  # Always return success
+
+    return MessageResponse(
+        message="If an account with this email exists, a password reset link has been sent."
+    )
+
+
+@router.post("/reset-password", response_model=TokenPair)
+@limiter.limit("10/minute")
+async def reset_password(
+    request: Request,
+    data: ResetPasswordRequest,
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    """Verify recovery token and set new password in both GoTrue and MediaHub."""
+    # Validate password strength
+    password_warnings = check_password_strength(data.new_password)
+    if password_warnings:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="; ".join(password_warnings),
+        )
+
+    # Verify recovery token with GoTrue
+    async with httpx.AsyncClient() as client:
+        verify_response = await client.post(
+            f"{settings.gotrue_external_url}/verify",
+            json={"type": "recovery", "token": data.token},
+        )
+
+    if not verify_response.is_success:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid or expired password reset link.",
+        )
+
+    gotrue_data = verify_response.json()
+    email = gotrue_data.get("user", {}).get("email")
+    gotrue_access_token = gotrue_data.get("access_token")
+
+    if not email or not gotrue_access_token:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Failed to verify recovery token.",
+        )
+
+    # Update password in GoTrue using the temporary session
+    async with httpx.AsyncClient() as client:
+        update_response = await client.put(
+            f"{settings.gotrue_external_url}/user",
+            headers={"Authorization": f"Bearer {gotrue_access_token}"},
+            json={"password": data.new_password},
+        )
+
+    if not update_response.is_success:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Failed to update password.",
+        )
+
+    # Update password in MediaHub database
+    result = await db.execute(select(User).where(User.email == email))
+    user = result.scalar_one_or_none()
+
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Account not found.",
+        )
+
+    if not user.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Account is deactivated.",
+        )
+
+    user.password_hash = AuthService.hash_password(data.new_password)
+    await db.commit()
+
+    return AuthService.create_token_pair(user.id, user.email, user.role.value)
 
 
 @router.post("/invite", response_model=InvitationResponse)

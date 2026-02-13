@@ -120,6 +120,24 @@ export const authApi = {
     });
     return response.data;
   },
+
+  verifyEmail: async (token: string) => {
+    const response = await api.post("/auth/verify-email", { token });
+    return response.data;
+  },
+
+  recoverPassword: async (email: string) => {
+    const response = await api.post("/auth/recover", { email });
+    return response.data;
+  },
+
+  resetPassword: async (token: string, newPassword: string) => {
+    const response = await api.post("/auth/reset-password", {
+      token,
+      new_password: newPassword,
+    });
+    return response.data;
+  },
 };
 
 // Users API
