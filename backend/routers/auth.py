@@ -18,7 +18,7 @@ from middleware.auth import get_current_active_user, get_user_client_ids, requir
 from middleware.rate_limit import limiter
 from models.user import User, UserRole
 from models.invitation import Invitation
-from services.auth_service import AuthService, TokenPair
+from services.auth_service import AuthService, GoTrueClient, TokenPair
 from services.recaptcha import verify_recaptcha
 from services.redis_store import RedisStore
 
@@ -133,32 +133,23 @@ async def login(
     login_data: LoginRequest,
     db: Annotated[AsyncSession, Depends(get_db)],
 ):
-    """Login with email and password, returns JWT tokens."""
+    """Login with email and password via GoTrue, returns JWT tokens."""
+    # Authenticate via GoTrue
+    gotrue_result = await GoTrueClient.login(login_data.email, login_data.password)
+    if "error" in gotrue_result:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid email or password",
+        )
+
+    # Check MediaHub authorization (public.users row required)
     result = await db.execute(select(User).where(User.email == login_data.email))
     user = result.scalar_one_or_none()
 
     if user is None:
         raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid email or password",
-        )
-
-    if user.auth_method == "google":
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="google_account",
-        )
-
-    if user.password_hash is None:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Account not activated. Please accept your invitation first.",
-        )
-
-    if not AuthService.verify_password(login_data.password, user.password_hash):
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid email or password",
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="No MediaHub access. Contact an admin for an invitation.",
         )
 
     if not user.is_active:
@@ -167,32 +158,32 @@ async def login(
             detail="Account is deactivated",
         )
 
-    return AuthService.create_token_pair(user.id, user.email, user.role.value)
+    # Update last_login
+    user.last_login = datetime.utcnow()
+    await db.commit()
+
+    return TokenPair(
+        access_token=gotrue_result["access_token"],
+        refresh_token=gotrue_result["refresh_token"],
+    )
 
 
 @router.post("/refresh", response_model=TokenPair)
 async def refresh_token(
     refresh_token: str,
-    db: Annotated[AsyncSession, Depends(get_db)],
 ):
-    """Get new access token using refresh token."""
-    token_data = AuthService.verify_refresh_token(refresh_token)
-    if token_data is None:
+    """Get new access token using refresh token via GoTrue."""
+    gotrue_result = await GoTrueClient.refresh(refresh_token)
+    if "error" in gotrue_result:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid or expired refresh token",
         )
 
-    result = await db.execute(select(User).where(User.id == token_data.user_id))
-    user = result.scalar_one_or_none()
-
-    if user is None or not user.is_active:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="User not found or inactive",
-        )
-
-    return AuthService.create_token_pair(user.id, user.email, user.role.value)
+    return TokenPair(
+        access_token=gotrue_result["access_token"],
+        refresh_token=gotrue_result["refresh_token"],
+    )
 
 
 @router.get("/me", response_model=UserResponse)
@@ -280,27 +271,15 @@ async def update_profile(
 async def change_password(
     password_data: ChangePasswordRequest,
     current_user: Annotated[User, Depends(get_current_active_user)],
-    db: Annotated[AsyncSession, Depends(get_db)],
 ):
-    """Change current user's password. Requires current password verification."""
-    if current_user.auth_method != "password":
+    """Change current user's password via GoTrue. Requires current password verification."""
+    if current_user.auth_method == "google":
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Password change is not available for Google OAuth accounts",
         )
 
-    if current_user.password_hash is None:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="No password set for this account",
-        )
-
-    if not AuthService.verify_password(password_data.current_password, current_user.password_hash):
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Current password is incorrect",
-        )
-
+    # Check new password strength
     password_warnings = check_password_strength(password_data.new_password)
     if password_warnings:
         raise HTTPException(
@@ -308,8 +287,24 @@ async def change_password(
             detail="; ".join(password_warnings),
         )
 
-    current_user.password_hash = AuthService.hash_password(password_data.new_password)
-    await db.commit()
+    # Verify current password by attempting GoTrue login
+    verify_result = await GoTrueClient.login(current_user.email, password_data.current_password)
+    if "error" in verify_result:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Current password is incorrect",
+        )
+
+    # Update password in GoTrue using the fresh token from verification
+    update_result = await GoTrueClient.update_user(
+        verify_result["access_token"],
+        {"password": password_data.new_password},
+    )
+    if "error" in update_result:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Failed to update password",
+        )
 
     return MessageResponse(message="Password changed successfully")
 
@@ -321,7 +316,7 @@ async def signup(
     signup_data: SignupRequest,
     db: Annotated[AsyncSession, Depends(get_db)],
 ):
-    """Public self-registration. Creates a VIEWER account with no client access."""
+    """Public self-registration via GoTrue. Creates a VIEWER account with no client access."""
     # Verify reCAPTCHA
     if not await verify_recaptcha(signup_data.recaptcha_token):
         raise HTTPException(
@@ -329,7 +324,7 @@ async def signup(
             detail="reCAPTCHA verification failed. Please try again.",
         )
 
-    # Check if email already taken
+    # Check if email already taken in MediaHub
     result = await db.execute(select(User).where(User.email == signup_data.email))
     if result.scalar_one_or_none():
         raise HTTPException(
@@ -340,10 +335,25 @@ async def signup(
     # Check password strength
     password_warnings = check_password_strength(signup_data.password)
 
-    # Create user as VIEWER with no client access
+    # Create user in GoTrue
+    gotrue_result = await GoTrueClient.signup(
+        signup_data.email,
+        signup_data.password,
+        user_metadata={"mediahub_role": "viewer"},
+    )
+    if "error" in gotrue_result:
+        error_msg = gotrue_result.get("error", {})
+        if isinstance(error_msg, dict):
+            error_msg = error_msg.get("msg", "Signup failed")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(error_msg),
+        )
+
+    # Create public.users row (GoTrue owns the password)
     user = User(
         email=signup_data.email,
-        password_hash=AuthService.hash_password(signup_data.password),
+        password_hash=None,
         role=UserRole.VIEWER,
         auth_method="password",
     )
@@ -351,11 +361,13 @@ async def signup(
     await db.commit()
     await db.refresh(user)
 
-    tokens = AuthService.create_token_pair(user.id, user.email, user.role.value)
+    # GoTrue may or may not return tokens (depends on email confirmation setting)
+    access_token = gotrue_result.get("access_token", "")
+    refresh_token = gotrue_result.get("refresh_token", "")
+
     return TokenPairWithWarnings(
-        access_token=tokens.access_token,
-        refresh_token=tokens.refresh_token,
-        token_type=tokens.token_type,
+        access_token=access_token,
+        refresh_token=refresh_token,
         password_warnings=password_warnings,
     )
 
@@ -368,7 +380,7 @@ async def verify_email_confirmation(
     db: Annotated[AsyncSession, Depends(get_db)],
 ):
     """Verify email confirmation token from GoTrue signup email."""
-    async with httpx.AsyncClient() as client:
+    async with httpx.AsyncClient(timeout=10.0) as client:
         response = await client.post(
             f"{settings.gotrue_external_url}/verify",
             json={"type": "signup", "token": data.token},
@@ -386,12 +398,16 @@ async def verify_email_confirmation(
 
     gotrue_data = response.json()
     email = gotrue_data.get("user", {}).get("email")
+    access_token = gotrue_data.get("access_token")
+    refresh_token_val = gotrue_data.get("refresh_token")
+
     if not email:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Could not determine email from confirmation token.",
         )
 
+    # Verify MediaHub authorization
     result = await db.execute(select(User).where(User.email == email))
     user = result.scalar_one_or_none()
 
@@ -407,7 +423,15 @@ async def verify_email_confirmation(
             detail="Account is deactivated.",
         )
 
-    return AuthService.create_token_pair(user.id, user.email, user.role.value)
+    # Return GoTrue tokens directly
+    if access_token and refresh_token_val:
+        return TokenPair(access_token=access_token, refresh_token=refresh_token_val)
+
+    # Fallback: GoTrue verify didn't return tokens (shouldn't happen for signup confirmation)
+    raise HTTPException(
+        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        detail="Email confirmed but no session tokens returned. Please log in manually.",
+    )
 
 
 @router.post("/recover", response_model=MessageResponse)
@@ -438,7 +462,7 @@ async def reset_password(
     data: ResetPasswordRequest,
     db: Annotated[AsyncSession, Depends(get_db)],
 ):
-    """Verify recovery token and set new password in both GoTrue and MediaHub."""
+    """Verify recovery token and set new password in GoTrue."""
     # Validate password strength
     password_warnings = check_password_strength(data.new_password)
     if password_warnings:
@@ -448,7 +472,7 @@ async def reset_password(
         )
 
     # Verify recovery token with GoTrue
-    async with httpx.AsyncClient() as client:
+    async with httpx.AsyncClient(timeout=10.0) as client:
         verify_response = await client.post(
             f"{settings.gotrue_external_url}/verify",
             json={"type": "recovery", "token": data.token},
@@ -463,6 +487,7 @@ async def reset_password(
     gotrue_data = verify_response.json()
     email = gotrue_data.get("user", {}).get("email")
     gotrue_access_token = gotrue_data.get("access_token")
+    gotrue_refresh_token = gotrue_data.get("refresh_token")
 
     if not email or not gotrue_access_token:
         raise HTTPException(
@@ -471,7 +496,7 @@ async def reset_password(
         )
 
     # Update password in GoTrue using the temporary session
-    async with httpx.AsyncClient() as client:
+    async with httpx.AsyncClient(timeout=10.0) as client:
         update_response = await client.put(
             f"{settings.gotrue_external_url}/user",
             headers={"Authorization": f"Bearer {gotrue_access_token}"},
@@ -484,7 +509,7 @@ async def reset_password(
             detail="Failed to update password.",
         )
 
-    # Update password in MediaHub database
+    # Verify MediaHub authorization
     result = await db.execute(select(User).where(User.email == email))
     user = result.scalar_one_or_none()
 
@@ -500,10 +525,11 @@ async def reset_password(
             detail="Account is deactivated.",
         )
 
-    user.password_hash = AuthService.hash_password(data.new_password)
-    await db.commit()
-
-    return AuthService.create_token_pair(user.id, user.email, user.role.value)
+    # Return GoTrue tokens directly (password is only in GoTrue now)
+    return TokenPair(
+        access_token=gotrue_access_token,
+        refresh_token=gotrue_refresh_token or "",
+    )
 
 
 @router.post("/invite", response_model=InvitationResponse)
@@ -564,7 +590,7 @@ async def accept_invitation(
     invite_data: AcceptInviteRequest,
     db: Annotated[AsyncSession, Depends(get_db)],
 ):
-    """Accept an invitation and set password."""
+    """Accept an invitation: create GoTrue user + public.users row."""
     result = await db.execute(
         select(Invitation).where(Invitation.token == invite_data.token)
     )
@@ -591,25 +617,53 @@ async def accept_invitation(
     # Check password strength (warn but allow)
     password_warnings = check_password_strength(invite_data.password)
 
-    # Create user
+    # Create user in GoTrue
+    gotrue_result = await GoTrueClient.signup(
+        invitation.email,
+        invite_data.password,
+        user_metadata={"mediahub_role": invitation.role.value},
+    )
+    # If GoTrue returns an error, the user might already exist in GoTrue
+    # (e.g., they have a CHT Platform account). That's okay — try logging in instead.
+    if "error" in gotrue_result:
+        # Try logging in with the provided password (user may already exist in GoTrue)
+        gotrue_result = await GoTrueClient.login(invitation.email, invite_data.password)
+        if "error" in gotrue_result:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Failed to create account. If you already have a CHT Platform account, use that password.",
+            )
+
+    # Create public.users row (GoTrue owns the password)
     user = User(
         email=invitation.email,
-        password_hash=AuthService.hash_password(invite_data.password),
+        password_hash=None,
         role=invitation.role,
+        auth_method="password",
     )
     db.add(user)
 
-    # Mark invitation as accepted (setting accepted_at makes is_accepted property return True)
+    # Mark invitation as accepted
     invitation.accepted_at = datetime.utcnow()
 
     await db.commit()
     await db.refresh(user)
 
-    tokens = AuthService.create_token_pair(user.id, user.email, user.role.value)
+    # Return GoTrue tokens if available, otherwise log in
+    access_token = gotrue_result.get("access_token", "")
+    refresh_token_val = gotrue_result.get("refresh_token", "")
+
+    if not access_token:
+        # GoTrue signup didn't return tokens (email confirmation required)
+        # Try logging in directly
+        login_result = await GoTrueClient.login(invitation.email, invite_data.password)
+        if "error" not in login_result:
+            access_token = login_result["access_token"]
+            refresh_token_val = login_result["refresh_token"]
+
     return TokenPairWithWarnings(
-        access_token=tokens.access_token,
-        refresh_token=tokens.refresh_token,
-        token_type=tokens.token_type,
+        access_token=access_token,
+        refresh_token=refresh_token_val,
         password_warnings=password_warnings,
     )
 
@@ -733,7 +787,7 @@ async def accept_invite_google_complete(
     if result.scalar_one_or_none():
         raise HTTPException(status_code=400, detail="User with this email already exists")
 
-    # Create user with Google auth
+    # Create public.users row with Google auth
     user = User(
         email=invitation.email,
         password_hash=None,
@@ -748,7 +802,11 @@ async def accept_invite_google_complete(
     await db.commit()
     await db.refresh(user)
 
-    return AuthService.create_token_pair(user.id, user.email, user.role.value)
+    # Return GoTrue token directly (already a valid GoTrue session from Google OAuth)
+    return TokenPair(
+        access_token=data.gotrue_access_token,
+        refresh_token="",
+    )
 
 
 @router.get("/login/google")
@@ -775,7 +833,7 @@ async def login_google_complete(
     if not google_email:
         raise HTTPException(status_code=401, detail="Invalid Google authentication token")
 
-    # Look up user
+    # Look up user in public.users for MediaHub authorization
     result = await db.execute(select(User).where(User.email == google_email))
     user = result.scalar_one_or_none()
 
@@ -790,13 +848,6 @@ async def login_google_complete(
         db.add(user)
         await db.commit()
         await db.refresh(user)
-        return AuthService.create_token_pair(user.id, user.email, user.role.value)
-
-    if user.auth_method != "google":
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="This account uses email/password login.",
-        )
 
     if not user.is_active:
         raise HTTPException(
@@ -804,7 +855,11 @@ async def login_google_complete(
             detail="Account is deactivated",
         )
 
-    return AuthService.create_token_pair(user.id, user.email, user.role.value)
+    # Return GoTrue token directly (already a valid GoTrue session from Google OAuth)
+    return TokenPair(
+        access_token=data.gotrue_access_token,
+        refresh_token="",
+    )
 
 
 @router.get("/invitations", response_model=list[InvitationResponse])

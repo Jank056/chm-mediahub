@@ -1,9 +1,9 @@
-"""Authentication service - JWT tokens, password hashing."""
+"""Authentication service - JWT decoding, password hashing, GoTrue client."""
 
-from datetime import datetime, timedelta
 from typing import Optional
 
 import bcrypt
+import httpx
 from jose import JWTError, jwt
 from pydantic import BaseModel
 
@@ -18,7 +18,6 @@ class TokenData(BaseModel):
     email: str
     role: str
     token_type: str  # "access" or "refresh"
-    user_type: str = "internal"  # "internal" (MediaHub) or "external" (CHT Platform)
 
 
 class TokenPair(BaseModel):
@@ -28,8 +27,64 @@ class TokenPair(BaseModel):
     token_type: str = "bearer"
 
 
+class GoTrueClient:
+    """HTTP client for GoTrue auth operations."""
+
+    @staticmethod
+    async def login(email: str, password: str) -> dict:
+        """Authenticate via GoTrue. Returns token dict or error dict."""
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.post(
+                f"{settings.gotrue_external_url}/token?grant_type=password",
+                json={"email": email, "password": password},
+            )
+            if not resp.is_success:
+                return {"error": resp.json(), "status": resp.status_code}
+            return resp.json()
+
+    @staticmethod
+    async def signup(email: str, password: str, user_metadata: dict | None = None) -> dict:
+        """Create user in GoTrue. Returns user dict or error dict."""
+        body: dict = {"email": email, "password": password}
+        if user_metadata:
+            body["data"] = user_metadata
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.post(
+                f"{settings.gotrue_external_url}/signup",
+                json=body,
+            )
+            if not resp.is_success:
+                return {"error": resp.json(), "status": resp.status_code}
+            return resp.json()
+
+    @staticmethod
+    async def refresh(refresh_token: str) -> dict:
+        """Refresh tokens via GoTrue. Returns new token dict or error dict."""
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.post(
+                f"{settings.gotrue_external_url}/token?grant_type=refresh_token",
+                json={"refresh_token": refresh_token},
+            )
+            if not resp.is_success:
+                return {"error": resp.json(), "status": resp.status_code}
+            return resp.json()
+
+    @staticmethod
+    async def update_user(access_token: str, data: dict) -> dict:
+        """Update user in GoTrue (e.g. password change). Returns user dict or error dict."""
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.put(
+                f"{settings.gotrue_external_url}/user",
+                headers={"Authorization": f"Bearer {access_token}"},
+                json=data,
+            )
+            if not resp.is_success:
+                return {"error": resp.json(), "status": resp.status_code}
+            return resp.json()
+
+
 class AuthService:
-    """Authentication service for password and token management."""
+    """Authentication service for password hashing and JWT decoding."""
 
     @staticmethod
     def hash_password(password: str) -> str:
@@ -47,59 +102,10 @@ class AuthService:
         )
 
     @staticmethod
-    def create_access_token(
-        user_id: str,
-        email: str,
-        role: str,
-        expires_delta: Optional[timedelta] = None
-    ) -> str:
-        """Create a JWT access token."""
-        if expires_delta is None:
-            expires_delta = timedelta(minutes=settings.access_token_expire_minutes)
-
-        expire = datetime.utcnow() + expires_delta
-        to_encode = {
-            "sub": user_id,
-            "email": email,
-            "role": role,
-            "type": "access",
-            "exp": expire,
-        }
-        return jwt.encode(to_encode, settings.jwt_secret, algorithm=settings.jwt_algorithm)
-
-    @staticmethod
-    def create_refresh_token(
-        user_id: str,
-        email: str,
-        role: str,
-        expires_delta: Optional[timedelta] = None
-    ) -> str:
-        """Create a JWT refresh token."""
-        if expires_delta is None:
-            expires_delta = timedelta(days=settings.refresh_token_expire_days)
-
-        expire = datetime.utcnow() + expires_delta
-        to_encode = {
-            "sub": user_id,
-            "email": email,
-            "role": role,
-            "type": "refresh",
-            "exp": expire,
-        }
-        return jwt.encode(to_encode, settings.jwt_secret, algorithm=settings.jwt_algorithm)
-
-    @staticmethod
-    def create_token_pair(user_id: str, email: str, role: str) -> TokenPair:
-        """Create both access and refresh tokens."""
-        access_token = AuthService.create_access_token(user_id, email, role)
-        refresh_token = AuthService.create_refresh_token(user_id, email, role)
-        return TokenPair(access_token=access_token, refresh_token=refresh_token)
-
-    @staticmethod
     def decode_token(token: str) -> Optional[TokenData]:
         """Decode and validate a JWT token.
 
-        Supports both GoTrue (Supabase) JWTs and MediaHub internal JWTs.
+        Supports both GoTrue (Supabase) JWTs and MediaHub legacy JWTs.
         GoTrue tokens are tried first as they're the primary auth system.
         """
         # Try GoTrue JWT first (if configured)
@@ -109,30 +115,27 @@ class AuthService:
                     token,
                     settings.gotrue_jwt_secret,
                     algorithms=[settings.jwt_algorithm],
-                    audience="authenticated"  # GoTrue uses this audience
+                    audience="authenticated"
                 )
-                # GoTrue JWT structure: sub=user_id, email, aud=authenticated
                 user_id = payload.get("sub")
                 email = payload.get("email")
-                # User metadata contains role and user_type
-                user_metadata = payload.get("user_metadata", {})
-                role = user_metadata.get("mediahub_role", "viewer")
-                user_type = user_metadata.get("user_type", "external")  # Default to external for safety
-
                 if user_id is None or email is None:
-                    pass  # Fall through to try MediaHub token
+                    pass  # Fall through to try legacy token
                 else:
+                    # Role is looked up from public.users in middleware,
+                    # but we extract it from metadata as a fallback
+                    user_metadata = payload.get("user_metadata", {})
+                    role = user_metadata.get("mediahub_role", "viewer")
                     return TokenData(
                         user_id=user_id,
                         email=email,
                         role=role,
-                        token_type="access",  # GoTrue tokens are always access tokens
-                        user_type=user_type,
+                        token_type="access",
                     )
             except JWTError:
-                pass  # Fall through to try MediaHub token
+                pass  # Fall through to try legacy token
 
-        # Try MediaHub internal JWT
+        # Try MediaHub legacy JWT (for backward compat during transition)
         try:
             payload = jwt.decode(
                 token,
@@ -152,44 +155,17 @@ class AuthService:
                 email=email,
                 role=role,
                 token_type=token_type,
-                user_type="internal",  # MediaHub internal JWTs are always internal users
             )
         except JWTError:
             return None
 
     @staticmethod
     def verify_access_token(token: str) -> Optional[TokenData]:
-        """Verify an access token.
-
-        Accepts both GoTrue tokens (type="access") and MediaHub tokens (type="access").
-        """
+        """Verify an access token (GoTrue or legacy MediaHub)."""
         token_data = AuthService.decode_token(token)
         if token_data is None:
             return None
-        # GoTrue tokens are always access tokens, MediaHub tokens have explicit type
         if token_data.token_type not in ("access", None):
-            return None
-        return token_data
-
-    @staticmethod
-    def verify_internal_access_token(token: str) -> Optional[TokenData]:
-        """Verify an access token belongs to an internal user.
-
-        Only internal users (user_type="internal") can access MediaHub.
-        External users (CHT Platform signups) are rejected.
-        """
-        token_data = AuthService.verify_access_token(token)
-        if token_data is None:
-            return None
-        if token_data.user_type != "internal":
-            return None
-        return token_data
-
-    @staticmethod
-    def verify_refresh_token(token: str) -> Optional[TokenData]:
-        """Verify a refresh token."""
-        token_data = AuthService.decode_token(token)
-        if token_data is None or token_data.token_type != "refresh":
             return None
         return token_data
 
@@ -198,7 +174,6 @@ class AuthService:
         """Extract verified email from a GoTrue access token.
 
         Used during Google OAuth flows to verify the user's identity.
-        Returns the email if the token is valid, None otherwise.
         """
         if not settings.gotrue_jwt_secret:
             return None

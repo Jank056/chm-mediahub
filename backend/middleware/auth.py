@@ -22,27 +22,28 @@ async def get_current_user(
 ) -> User:
     """Extract and validate the current user from JWT token.
 
-    Only internal users (user_type="internal") can access MediaHub.
-    External users (CHT Platform signups) are rejected.
+    Accepts GoTrue JWTs (primary) and legacy MediaHub JWTs.
+    Authorization is determined by the presence of a public.users row —
+    users without one (e.g. CHT Platform-only clinicians) get 403.
     """
     token = credentials.credentials
 
-    token_data = AuthService.verify_internal_access_token(token)
+    token_data = AuthService.verify_access_token(token)
     if token_data is None:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid or expired token, or user not authorized for MediaHub",
+            detail="Invalid or expired token",
             headers={"WWW-Authenticate": "Bearer"},
         )
 
-    result = await db.execute(select(User).where(User.id == token_data.user_id))
+    # Look up by email for authorization — public.users row required for MediaHub access
+    result = await db.execute(select(User).where(User.email == token_data.email))
     user = result.scalar_one_or_none()
 
     if user is None:
         raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="User not found",
-            headers={"WWW-Authenticate": "Bearer"},
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="No MediaHub access. Contact an admin for an invitation.",
         )
 
     return user
